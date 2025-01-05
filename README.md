@@ -5,7 +5,7 @@
   <img src="https://app.wafrn.net/assets/logo.png" alt="Wafrn logo" width="350"/>
 </a>
 
-**[Wafrn](https://github.com/gabboman/wafrn) &ndash; The social media that respects you.**
+**[Wafrn](https://github.com/gabboman/wafrn) &ndash; Socijalna mreža koja tebe poštuje.**
 
 ---
 
@@ -13,22 +13,22 @@
 
 # Wafrn
 
-Wafrn is an open source social network that connects with the Fediverse. The frontend is Tumblr-inspired.
+Wafrn je društvena mreža otvorenog izvora koja se povezuje sa Fediverse-om. Frontened je inspirisan od strane Tumblr-a.
 
-The "main" wafrn app is located at [app.wafrn.net](https://app.wafrn.net).
+WAFRN-ova "glavna" instanca je na [app.wafrn.net](https://app.wafrn.net) (na engleskom je).
 
-- [Project structure](#project-structure)
+- [Struktura projekta](#struktura-projekta)
 - [Host Wafrn yourself](#host-wafrn-yourself)
   - [What will you need](#what-will-you-need)
   - [First steps](#first-steps)
   - [Populate database](#populate-database)
   - [Update wafrn](#update-wafrn)
-- [Contributing](#contributing)
-- [License](#license)
+- [Doprinosi](#contributing)
+- [Licenca](#license)
 
-## Project Structure
+## Struktura projekta
 
-Wafrn is split between an [Angular](https://angular.dev) frontend and a [NodeJS](https://nodejs.org/en) backend.
+Wafrn je podeljen na [Angular](https://angular.dev) frontend i [NodeJS](https://nodejs.org/en) backend.
 
 ```text
 packages/
@@ -46,9 +46,11 @@ packages/
     └── ...
 ```
 
-(Tree made with [tree.nathanfriend.io](https://tree.nathanfriend.io/))
+(Drvo napravljeno sa [tree.nathanfriend.io](https://tree.nathanfriend.io/))
 
 ## Host Wafrn Yourself
+
+(Ovaj deo će biti dosta promenjen taki da još uvek nije preveden.)
 
 > [!NOTE]  
 > THIS GUIDE NEEDS UPDATING. IT WILL GET UPDATED SOON. SORRY
@@ -134,15 +136,11 @@ This will do a pull the latest changes and keep the waffle up to date
 
 </details>
 
-## Contributing
-
-If you would like to help develop the Frontend or Backend, read the README.md of the respective package.
-
-- [Frontend - README.md](./packages/frontend/README.md)
-- [Backend - README.md](./packages/backend/README.md)
+## Doprinosi
+Ako bih da doprineseš WAFRN-u, idi na [glavni repozitorijum](https://github.com/gabboman/wafrn).
 
 ## License
 
-The frontend uses [Apache License 2.0](https://choosealicense.com/licenses/apache-2.0/).
+Frontend je pod [Apache License 2.0](https://choosealicense.com/licenses/apache-2.0/).
 
-The backend uses [GNU AGPLv3](https://choosealicense.com/licenses/agpl-3.0/)
+Backend je pod [GNU AGPLv3](https://choosealicense.com/licenses/agpl-3.0/) licencom.
