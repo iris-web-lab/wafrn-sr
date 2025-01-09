@@ -2,20 +2,20 @@
   mat-button
   [matMenuTriggerFor]="colorSchemeMenu"
   class="theme-toggle"
-  title="Toggle theme"
-  aria-label="Toggle theme"
-  matTooltip="{{ colorSchemeText() }} theme"
+  title="Promeni temu"
+  aria-label="Promeni temu"
+  matTooltip="{{ colorSchemeText() }} tema"
 >
   <fa-icon [icon]="paletteIcon"></fa-icon>
 </button>
 <mat-menu #colorSchemeMenu="matMenu">
-  <button mat-menu-item (click)="setColorScheme('default')">Default</button>
-  <button mat-menu-item (click)="setColorScheme('tan')">Tan</button>
-  <button mat-menu-item (click)="setColorScheme('green')">Green</button>
-  <button mat-menu-item (click)="setColorScheme('gold')">Gold</button>
+  <button mat-menu-item (click)="setColorScheme('default')">Original</button>
+  <button mat-menu-item (click)="setColorScheme('tan')">Ten</button>
+  <button mat-menu-item (click)="setColorScheme('green')">Zelena</button>
+  <button mat-menu-item (click)="setColorScheme('gold')">Zlatna</button>
   <hr />
   <button mat-menu-item>
-    <mat-checkbox [checked]="centerLayoutMode" (click)="updateCenterLayout()">Center layout</mat-checkbox>
+    <mat-checkbox [checked]="centerLayoutMode" (click)="updateCenterLayout()">Centriraj sadržaj</mat-checkbox>
   </button>
 </mat-menu>
 
