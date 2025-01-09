@@ -5,7 +5,7 @@
   </mat-form-field>
 
   @if (loggedIn) {
-    <app-info-card type="info" class="mb-3">Tvoj nalog je prijavljen, ovo pitanje nije anonimno</app-info-card>
+    <app-info-card type="info" addClass="mb-3">Tvoj nalog je prijavljen, ovo pitanje nije anonimno</app-info-card>
   }
 
   <button [disabled]="!askForm.valid" mat-flat-button class="w-full my-2" type="submit">Pitaj</button>

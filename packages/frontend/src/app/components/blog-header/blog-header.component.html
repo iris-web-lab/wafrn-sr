@@ -141,18 +141,17 @@
     </footer>
   }
 </mat-card>
-<app-info-card
-  type="info"
-  class="block pt-3 pb-6 mx-2 lg:mx-4 wafrn-container notification"
-  *ngIf="blogDetails.url.startsWith('@')"
-  >S obzirom na to da je korisnik sa druge fedi instance, prikazane informacije mogu biti nepotpune.
-  <a
-    [href]="
-      blogDetails.url.split('@').length === 3
-        ? blogDetails.remoteId
-        : 'https://bsky.app/profile/' + blogDetails.url.split('@')[1]
-    "
-    target="_blank"
-    >Prikaži na originalnoj instanci</a
-  >
-</app-info-card>
+@if (blogDetails.url.startsWith('@')) {
+  <app-info-card type="info" class="block pt-3 pb-6 mx-2 lg:mx-4 wafrn-container"
+    >S obzirom na to da je korisnik sa druge fedi instance, prikazane informacije mogu biti nepotpune.
+    <a
+      [href]="
+        blogDetails.url.split('@').length === 3
+          ? blogDetails.remoteId
+          : 'https://bsky.app/profile/' + blogDetails.url.split('@')[1]
+      "
+      target="_blank"
+      >Prikaži na originalnoj instanci</a
+    >
+  </app-info-card>
+}
