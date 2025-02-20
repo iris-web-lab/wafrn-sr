@@ -17,6 +17,7 @@ import {
   faQuestionCircle,
   faQuoteLeft,
   faServer,
+  faSkullCrossbones,
   faUnlock,
   faUser
 } from '@fortawesome/free-solid-svg-icons'
@@ -45,6 +46,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox'
 import { EnvironmentService } from 'src/app/services/environment.service'
 import { MatTooltipModule } from '@angular/material/tooltip'
 import { InfoCardComponent } from '../info-card/info-card.component'
+import { TranslateModule } from '@ngx-translate/core'
 
 @Component({
   selector: 'app-new-editor',
@@ -68,7 +70,8 @@ import { InfoCardComponent } from '../info-card/info-card.component'
     MatCheckboxModule,
     MatTooltipModule,
     InfoCardComponent,
-    MatDialogModule
+    MatDialogModule,
+    TranslateModule
   ],
   templateUrl: './new-editor.component.html',
   styleUrl: './new-editor.component.scss'
@@ -118,6 +121,7 @@ export class NewEditorComponent implements OnDestroy {
   quoteIcon = faQuoteLeft
   contentWarningIcon = faExclamationTriangle
   landMineIcon = faLandMineOn
+  skull = faSkullCrossbones
   infoIcon = faQuestionCircle
   alertIcon = faExclamationTriangle
   emojiSubscription: Subscription
@@ -137,7 +141,7 @@ export class NewEditorComponent implements OnDestroy {
     this.editing = this.data?.edit == true
     this.privacy = this.loginService.getUserDefaultPostPrivacyLevel()
     if (this.data?.post) {
-      this.contentWarning = this.data.post.content_warning
+      this.contentWarning = this.data.post.content_warning ? this.data.post.content_warning : ''
       this.privacy = Math.max(this.data.post.privacy, this.privacy)
     }
     this.emojiSubscription = this.postService.updateFollowers.subscribe(() => {
@@ -197,7 +201,7 @@ export class NewEditorComponent implements OnDestroy {
     this.updateMentionsPanelPosition()
     const textToMatch = (' ' +
       this.postCreatorForm.value.content?.slice(cursorPosition - 250, cursorPosition).replaceAll('\n', ' ')) as string
-    const matches = textToMatch.match(/ [@:][\w-\.]+@?[\w-\.]*$/)
+    const matches = textToMatch.match(/[\n\r\s]?[@:][\w-\.]+@?[\w-\.]*$/)
     if (matches && matches.length > 0) {
       const match = matches[0].trim()
       if (match.startsWith('@')) {
@@ -232,7 +236,7 @@ export class NewEditorComponent implements OnDestroy {
   insertMention(user: { img: string; text: string }) {
     let initialPart = (' ' + this.postCreatorForm.value.content?.slice(0, this.cursorTextPosition)) as string
     const userUrl = user.text.startsWith(':') ? user.text : user.text.startsWith('@') ? user.text : '@' + user.text
-    initialPart = initialPart.replace(/ [@:][A-Z0-9a-z_.@-]*$/i, ' ' + userUrl)
+    initialPart = initialPart.replace(/[[@:][A-Z0-9a-z_.@-]*$/i, userUrl)
     let finalPart = this.postCreatorForm.value.content?.slice(this.cursorTextPosition) as string
     this.postCreatorForm.controls['content'].patchValue(initialPart.trim() + ' ' + finalPart.trim())
     this.suggestions = []

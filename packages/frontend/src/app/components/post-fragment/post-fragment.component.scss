@@ -5,8 +5,12 @@
   --mdc-protected-button-container-color: var(--mat-sys-surface-container-high);
 }
 
-.blurry {
-  visibility: hidden;
+.post-content {
+  content-visibility: auto;
+}
+
+.post-content.hidden {
+  display: none !important;
 }
 
 .reacted {

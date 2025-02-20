@@ -1,9 +1,24 @@
 import { Op } from 'sequelize'
-import { Post, PostMentionsUserRelation, PostTag, Quotes, UserLikesPostRelations } from '../db.js'
+import { Notification, Post, PostMentionsUserRelation, PostTag, Quotes, UserLikesPostRelations } from '../db.js'
 
 async function deletePostCommon(id: string) {
   const postToDelete = await Post.findByPk(id)
   if (postToDelete) {
+    if (postToDelete.isReblog) {
+      await Notification.destroy({
+        where: {
+          postId: postToDelete.parentId,
+          userId: postToDelete.userId
+        }
+      })
+    } else {
+      await Notification.destroy({
+        where: {
+          postId: id
+        }
+      })
+    }
+
     const quotesToDelete = await Quotes.findAll({
       where: {
         [Op.or]: [
@@ -42,6 +57,7 @@ async function deletePostCommon(id: string) {
     } else {
       postToDelete.content_warning = ''
       postToDelete.content = '<p>This post has been deleted</p>'
+      postToDelete.isDeleted = true
       await postToDelete.save()
     }
   }

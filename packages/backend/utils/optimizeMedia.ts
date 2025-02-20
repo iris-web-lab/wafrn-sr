@@ -12,7 +12,7 @@ export default async function optimizeMedia(
 ): Promise<string> {
   const fileAndExtension = options?.outPath ? [options.outPath, ''] : inputPath.split('.')
   const originalExtension = fileAndExtension[1].toLowerCase()
-  fileAndExtension[1] = options?.forceImageExtension ? options.forceImageExtension : 'avif'
+  fileAndExtension[1] = options?.forceImageExtension ? options.forceImageExtension : 'webp'
   let outputPath = fileAndExtension.join('.')
   const doNotDelete = options?.keep ? options.keep : false
   switch (originalExtension) {
@@ -34,35 +34,34 @@ export default async function optimizeMedia(
       outputPath = fileAndExtension.join('.')
       // eslint-disable-next-line no-unused-vars
 
-      new FfmpegCommand(inputPath)
-        .ffprobe(function (err: any, data: any) {
-          const stream = data.streams.find((stream: any) => stream.coded_height)
-          let horizontalResolution = stream ? stream.coded_width : 1280;
-          let verticalResolution = stream ? stream.coded_height : 1280;
-          horizontalResolution = Math.min(horizontalResolution, 1280)
-          verticalResolution = Math.min(verticalResolution, 1280)
-          const resolutionString = horizontalResolution > verticalResolution ? `${horizontalResolution}x?` : `?x${verticalResolution}`
-          const videoCodec = stream.codec_name == 'h264' ? 'copy' : 'libx264'
-          const command = new FfmpegCommand(inputPath)
-          if (videoCodec != 'copy') {
-            command.size(resolutionString)
-            command.videoBitrate('3500')
-          }
-          command
-            .audioCodec('aac')
-            .videoCodec(videoCodec)
-            .renice(20)
-            .save(outputPath)
-            .on('end', () => {
-              try {
-                fs.unlinkSync(inputPath)
-                logger.trace('media converted')
-              } catch (exc) {
-                logger.warn(exc)
-              }
-            })
-        })
-
+      new FfmpegCommand(inputPath).ffprobe(function (err: any, data: any) {
+        const stream = data.streams.find((stream: any) => stream.coded_height)
+        let horizontalResolution = stream ? stream.coded_width : 1280
+        let verticalResolution = stream ? stream.coded_height : 1280
+        horizontalResolution = Math.min(horizontalResolution, 1280)
+        verticalResolution = Math.min(verticalResolution, 1280)
+        const resolutionString =
+          horizontalResolution > verticalResolution ? `${horizontalResolution}x?` : `?x${verticalResolution}`
+        const videoCodec = stream.codec_name == 'h264' ? 'copy' : 'libx264'
+        const command = new FfmpegCommand(inputPath)
+        if (videoCodec != 'copy') {
+          command.size(resolutionString)
+          command.videoBitrate('3500')
+        }
+        command
+          .audioCodec('aac')
+          .videoCodec(videoCodec)
+          .renice(20)
+          .save(outputPath)
+          .on('end', () => {
+            try {
+              fs.unlinkSync(inputPath)
+              logger.trace('media converted')
+            } catch (exc) {
+              logger.warn(exc)
+            }
+          })
+      })
 
       break
     default:
@@ -80,13 +79,10 @@ export default async function optimizeMedia(
       if (options?.maxSize) {
         await conversion.resize(options.maxSize, options.maxSize)
       }
-      if (fileAndExtension[1] == 'avif') {
-        /* disable lossless images as it takes time and space that bsky dislikes
-        conversion.avif({
-          quality: 80,
+      if (fileAndExtension[1] == 'webp') {
+        conversion.webp({
           lossless: inputPath.toLowerCase().endsWith('png')
         })
-         */
       }
       await conversion.toFile(outputPath)
       if (!doNotDelete) {

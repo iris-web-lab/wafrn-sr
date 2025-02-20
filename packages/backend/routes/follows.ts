@@ -1,12 +1,12 @@
 import { Application, Response } from 'express'
-import { Blocks, Follows, User } from '../db.js'
+import { Blocks, Follows, Notification, User } from '../db.js'
 import { authenticateToken } from '../utils/authenticateToken.js'
 
 import getBlockedIds from '../utils/cacheGetters/getBlockedIds.js'
 import { logger } from '../utils/logger.js'
 import { remoteFollow } from '../utils/activitypub/remoteFollow.js'
 import { remoteUnfollow } from '../utils/activitypub/remoteUnfollow.js'
-import {Model, Op, Sequelize} from 'sequelize'
+import { Model, Op, Sequelize } from 'sequelize'
 import AuthorizedRequest from '../interfaces/authorizedRequest.js'
 import { follow } from '../utils/follow.js'
 import { redisCache } from '../utils/redis.js'
@@ -15,9 +15,11 @@ import { getNotYetAcceptedFollowedids } from '../utils/cacheGetters/getNotYetAcc
 import { getUserOptions } from '../utils/cacheGetters/getUserOptions.js'
 import { getMutedPosts } from '../utils/cacheGetters/getMutedPosts.js'
 import { environment } from '../environment.js'
-import {getAtProtoSession} from "../atproto/utils/getAtProtoSession.js";
+import { getAtProtoSession } from '../atproto/utils/getAtProtoSession.js'
+import { getCacheAtDids } from '../atproto/cache/getCacheAtDids.js'
 
 export default function followsRoutes(app: Application) {
+  // TODO refactor? It works, but I have a few res.send and thats not nice!
   app.post('/api/follow', authenticateToken, async (req: AuthorizedRequest, res: Response) => {
     let success = false
     try {
@@ -26,7 +28,7 @@ export default function followsRoutes(app: Application) {
       const userFederatesWithThreads = options.filter(
         (elem) => elem.optionName === 'wafrn.federateWithThreads' && elem.optionValue === 'true'
       )
-      const userToBeFollowed = await User.findByPk(req.body.userId) as Model<any, any>
+      const userToBeFollowed = (await User.findByPk(req.body.userId)) as Model<any, any>
 
       if (userFederatesWithThreads.length === 0) {
         if (userToBeFollowed.url.toLowerCase().endsWith('threads.net')) {
@@ -38,21 +40,21 @@ export default function followsRoutes(app: Application) {
         }
       }
       // bsky user
-      if(userToBeFollowed.url.split('@').length === 2 && userToBeFollowed.bskyDid) {
-        const localUser = await User.findByPk(posterId) as Model<any, any>
-        if(localUser.enableBsky) {
+      if (userToBeFollowed.url.split('@').length === 2 && userToBeFollowed.bskyDid) {
+        const localUser = (await User.findByPk(posterId)) as Model<any, any>
+        if (localUser.enableBsky) {
           // follow on bsk
-          const agent = await getAtProtoSession(localUser);
+          const agent = await getAtProtoSession(localUser)
           const followResult = await agent.follow(userToBeFollowed.bskyDid)
-          if(followResult.validationStatus == 'valid') {
+          if (followResult.validationStatus == 'valid') {
             await follow(posterId, req.body.userId, res, followResult)
-            redisCache.del('follows:bsky')
-            return res.send({success: true})
+            await getCacheAtDids(true)
+            return res.send({ success: true })
           } else {
-            res.sendStatus(500)
+            return res.sendStatus(500)
           }
         } else {
-          res.status(500).send({
+          return res.status(500).send({
             error: true,
             message: 'You are trying to follow a bsky user. You need to enable this on your profile'
           })
@@ -77,8 +79,14 @@ export default function followsRoutes(app: Application) {
     try {
       const posterId = req.jwtData?.userId
       if (req.body?.userId) {
-        const userUnfollowed = await User.findByPk(req.body.userId) as Model<any, any>
-
+        const userUnfollowed = (await User.findByPk(req.body.userId)) as Model<any, any>
+        await Notification.destroy({
+          where: {
+            notificationType: 'FOLLOW',
+            userId: posterId,
+            notifiedUserId: userUnfollowed.id
+          }
+        })
         if (userUnfollowed.remoteId) {
           const localUser = await User.findOne({ where: { id: posterId } })
           remoteUnfollow(localUser, userUnfollowed)
@@ -88,17 +96,16 @@ export default function followsRoutes(app: Application) {
             })
         }
 
-        const follow = await Follows.findOne({
-          where:
-            {
-              followerId: posterId,
-              followedId: userUnfollowed.id
-            }
-        }) as Model<any, any>
-        if(follow?.bskyUri) {
-          const agent = await getAtProtoSession(await User.findByPk(posterId));
+        const follow = (await Follows.findOne({
+          where: {
+            followerId: posterId,
+            followedId: userUnfollowed.id
+          }
+        })) as Model<any, any>
+        if (follow?.bskyUri) {
+          const agent = await getAtProtoSession(await User.findByPk(posterId))
           await agent.deleteFollow(follow.bskyUri)
-          redisCache.del('follows:bsky')
+          await getCacheAtDids(true)
         }
         userUnfollowed.removeFollower(posterId)
         redisCache.del('follows:full:' + posterId)

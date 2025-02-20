@@ -1,9 +1,13 @@
 import { Model } from 'sequelize'
 import { BskyAgent, RichText } from '@atproto/api'
-import { Media, Post, Quotes, User } from '../../db.js'
+import { Media, Post, PostMentionsUserRelation, Quotes, User } from '../../db.js'
 import { environment } from '../../environment.js'
 import fs from 'fs/promises'
 import { getPostUrlForQuote } from '../../utils/activitypub/postToJSONLD.js'
+import RichtextBuilder from '@atcute/bluesky-richtext-builder'
+import { Main } from '@atproto/api/dist/client/types/app/bsky/richtext/facet.js'
+import { tokenize } from '@atcute/bluesky-richtext-parser'
+import { removeMarkdown } from './removeMarkdown.js'
 
 async function postToAtproto(post: Model<any, any>, agent: BskyAgent) {
   let labels: any = undefined
@@ -33,14 +37,64 @@ async function postToAtproto(post: Model<any, any>, agent: BskyAgent) {
       }
     }
   }
-  const contentWarning = post.content_warning ? `[${post.content_warning.trim()}]\n` : ''
 
+  const contentWarning = post.content_warning ? `[${post.content_warning.trim()}]\n` : ''
   const tags = (await post.getPostTags()).map((elem) => `#${elem.tagName.trim().replaceAll(' ', '-')}`).join(' ')
   let postText: string = (contentWarning + post.markdownContent.trim() + ' ' + tags).trim()
+
   if (quotedPost && !bskyQuote) {
     const remoteId = getPostUrlForQuote(quotedPost)
     postText = postText + '\nRE: ' + remoteId
   }
+
+  const mentionedUserRelations = await PostMentionsUserRelation.findAll({
+    where: {
+      postId: post.id
+    }
+  })
+
+  for (const mentionedRelation of mentionedUserRelations) {
+    const user = await User.findByPk(mentionedRelation.userId)
+    const escapedUrl = user.url.replaceAll(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&')
+    let mentionRegex = new RegExp(`(?<=\\s|^)(@${escapedUrl})(?=\\s|$)`, 'gm')
+
+    // Fedi users
+    if (user.remoteMentionUrl) {
+      // A Fedi user url already has an @ in the start
+      mentionRegex = new RegExp(`(?<=\\s|^)(${escapedUrl})(?=\\s|$)`, 'gm')
+      postText = postText.replaceAll(mentionRegex, `[@${user.url.split('@')[1]}](${user.remoteMentionUrl})`)
+      continue
+    }
+
+    // Local users
+    if (!user.isBlueskyUser) {
+      if (user.bskyDid && user.enableBsky) {
+        const response = await agent.getProfile({ actor: user.bskyDid })
+        if (response.data)
+          postText = postText.replaceAll(mentionRegex, `@${response.data.handle}`)
+      }
+      else postText = postText.replaceAll(mentionRegex, `[@${user.url}](${environment.frontendUrl}/fediverse/blog/${user.url.toLowerCase()})`)
+    }
+  }
+
+  const ask = await post.getAsk()
+  if (ask) {
+    const userAsker = await User.findByPk(ask.userAsker)
+    if (userAsker) {
+      postText =
+        `[${userAsker.name} asked:](https://${environment.instanceUrl}/fediverse/post/${post.id}) ` +
+        `${ask.question}\n\n${postText}`
+    }
+  }
+
+  postText = removeMarkdown(postText)
+  const builder = new RichtextBuilder()
+  tokenize(postText).forEach((token) => {
+    if (token.type === 'link') builder.addLink(token.text, token.url)
+    else builder.addText(token.raw)
+  })
+  postText = builder.text
+
   const medias = await Media.findAll({
     where: {
       postId: post.id
@@ -63,11 +117,15 @@ async function postToAtproto(post: Model<any, any>, agent: BskyAgent) {
       mediasToNotSend.push(index)
     }
   }
+
   const tmpRichText = new RichText({ text: postText })
+  let postShortened: boolean = false
   if (tmpRichText.length > 300 || medias.length > 4 || maxMediaSize > 1000000) {
     postText =
       postText.slice(0, 150) + `... see complete post at https://${environment.instanceUrl}/fediverse/post/${post.id}`
+    postShortened = true
   }
+
   const bskyMedias = medias
     .filter((elem: any, index) => !mediasToNotSend.includes(index))
     .map(async (media) => {
@@ -84,21 +142,38 @@ async function postToAtproto(post: Model<any, any>, agent: BskyAgent) {
         }
       }
     })
+
   const rt = new RichText({
     text: postText
   })
   await rt.detectFacets(agent)
+
+  const encoder = new TextEncoder()
+  const byteSliceLength = encoder.encode(postText.slice(0, 150)).byteLength
+  builder.facets.forEach((facet) => {
+    // Do not add facets representing links that were removed
+    if (postShortened && facet.index.byteEnd > byteSliceLength) return
+
+    if (rt.facets) rt.facets.push(facet as Main)
+    else rt.facets = [facet as Main]
+  })
+
   let res: any = {
     text: rt.text,
     facets: rt.facets,
-    createdAt: new Date(post.createdAt).toISOString()
+    createdAt: new Date(post.createdAt).toISOString(),
+    fullText: post.content,
+    fullTags: tags,
+    fediverseId: `${environment.frontendUrl}/fediverse/post/${post.id}`
   }
+
   if (bskyMedias.length) {
     res.embed = {
       $type: 'app.bsky.embed.images',
       images: await Promise.all(bskyMedias)
     }
   }
+
   if (post.parentId) {
     // ok this post is in reply to something
     const parent = (await Post.findByPk(post.parentId)) as Model<any, any>
@@ -107,6 +182,7 @@ async function postToAtproto(post: Model<any, any>, agent: BskyAgent) {
         hierarchyLevel: 1
       }
     })
+
     const rootPost = ancestors[0]
     res.reply = {
       root: {
@@ -123,9 +199,11 @@ async function postToAtproto(post: Model<any, any>, agent: BskyAgent) {
   if (bskyQuote) {
     res.embed = bskyQuote
   }
+
   if (labels) {
     res.labels = labels
   }
+
   return res
 }
 

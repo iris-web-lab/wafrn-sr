@@ -87,6 +87,7 @@ const User = sequelize.define(
       unique: true
     },
     description: Sequelize.TEXT,
+    descriptionMarkdown: Sequelize.TEXT,
     name: Sequelize.TEXT,
     url: {
       type: Sequelize.STRING(768),
@@ -169,8 +170,30 @@ const User = sequelize.define(
     bskyDid: {
       unique: true,
       type: Sequelize.STRING(768)
+    },
+    lastActiveAt: {
+      type: Sequelize.DATE,
+      defaultValue: new Date(0),
+      allowNull: true
+    },
+    isBlueskyUser: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        return !!(this.url.split('@').length == 2 && this.bskyDid)
+      },
+      set(value) {
+        throw new Error('Do not try to set the `isBlueskyUser` value!')
+      }
+    },
+    isFediverseUser: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        return !!(this.url.split('@').length == 3 && this.remoteId)
+      },
+      set(value) {
+        throw new Error('Do not try to set the `isFediverseUser` value!')
+      }
     }
-
   },
   {
     indexes: [
@@ -198,7 +221,6 @@ const User = sequelize.define(
     ]
   }
 )
-
 
 const UserOptions = sequelize.define(
   'userOptions',
@@ -345,6 +367,16 @@ const Post = sequelize.define(
       type: Sequelize.BOOLEAN,
       allowNull: true,
       defaultValue: false
+    },
+    isReblog: {
+      type: Sequelize.BOOLEAN,
+      allowNull: true,
+      defaultValue: false
+    },
+    isDeleted: {
+      type: Sequelize.BOOLEAN,
+      allowNull: true,
+      defaultValue: false
     }
   },
   {
@@ -376,6 +408,14 @@ const Post = sequelize.define(
       {
         unique: true,
         fields: ['userId', 'title']
+      },
+      {
+        unique: false,
+        fields: ['isReblog']
+      },
+      {
+        unique: false,
+        fields: ['isReblog', 'parentId']
       }
     ]
   }
@@ -390,7 +430,7 @@ const SilencedPost = sequelize.define('silencedPost', {
 const PostTag = sequelize.define(
   'postTags',
   {
-    tagName: Sequelize.TEXT,
+    tagName: Sequelize.TEXT
   },
   {
     indexes: [
@@ -479,38 +519,42 @@ const EmojiCollection = sequelize.define('emojiCollections', {
   }
 })
 
-const Media = sequelize.define('medias', {
-  mediaOrder: {
-    type: Sequelize.INTEGER,
-    defaultValue: 0
+const Media = sequelize.define(
+  'medias',
+  {
+    mediaOrder: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    },
+    NSFW: Sequelize.BOOLEAN,
+    description: Sequelize.TEXT,
+    url: Sequelize.TEXT,
+    ipUpload: Sequelize.STRING,
+    external: {
+      defaultValue: false,
+      type: Sequelize.BOOLEAN,
+      allowNull: false
+    },
+    mediaType: Sequelize.STRING,
+    width: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    },
+    height: {
+      type: Sequelize.INTEGER,
+      defaultValue: 0
+    },
+    blurhash: Sequelize.STRING
   },
-  NSFW: Sequelize.BOOLEAN,
-  description: Sequelize.TEXT,
-  url: Sequelize.TEXT,
-  ipUpload: Sequelize.STRING,
-  external: {
-    defaultValue: false,
-    type: Sequelize.BOOLEAN,
-    allowNull: false
-  },
-  mediaType: Sequelize.STRING,
-  width: {
-    type: Sequelize.INTEGER,
-    defaultValue: 0
-  },
-  height: {
-    type: Sequelize.INTEGER,
-    defaultValue: 0
-  },
-  blurhash: Sequelize.STRING
-}, {
-  indexes: [
-    {
-      fields: ['postId'],
-      unique: false
-    }
-  ]
-})
+  {
+    indexes: [
+      {
+        fields: ['postId'],
+        unique: false
+      }
+    ]
+  }
+)
 
 const PostReport = sequelize.define('postReports', {
   resolved: Sequelize.BOOLEAN,
@@ -593,7 +637,7 @@ const UserLikesPostRelations = sequelize.define(
             attribute: 'postId'
           }
         ]
-      },
+      }
     ]
   }
 )
@@ -614,7 +658,7 @@ const QuestionPollAnswer = sequelize.define('questionPollAnswer', {
     type: Sequelize.STRING(768),
     allowNull: true,
     unique: true
-  },
+  }
 })
 
 const PostHostView = sequelize.define('postHostView', {})
@@ -648,6 +692,58 @@ const Ask = sequelize.define(
 )
 const BskyInviteCodes = sequelize.define('bskyInviteCodes', {
   code: Sequelize.STRING(512)
+})
+
+const Notification = sequelize.define(
+  'notifications',
+  {
+    notificationType: Sequelize.STRING(128)
+  },
+  {
+    indexes: [
+      {
+        fields: ['notifiedUserId'],
+        unique: false
+      },
+      {
+        fields: ['notifiedUserId', 'createdAt'],
+        unique: false
+      },
+      {
+        fields: ['notificationType', 'postId'],
+        unique: false
+      },
+      {
+        fields: ['userId'],
+        unique: false
+      },
+      {
+        fields: ['postId'],
+        unique: false
+      },
+      {
+        fields: ['notificationType', 'postId'],
+        unique: false
+      }
+    ]
+  }
+)
+
+Notification.belongsTo(User, {
+  as: 'notifiedUser'
+})
+
+Notification.belongsTo(User, {
+  as: 'user'
+})
+
+Notification.belongsTo(Post, {
+  constraints: false,
+  foreignKey: 'postId'
+})
+
+Notification.belongsTo(EmojiReaction, {
+  constraints: false
 })
 
 Post.hasOne(Ask)
@@ -813,7 +909,7 @@ Post.belongsToMany(User, {
   as: 'mentionPost',
   foreignKey: 'postId',
   onDelete: 'cascade'
-},)
+})
 
 UserLikesPostRelations.belongsTo(User)
 UserLikesPostRelations.belongsTo(Post)
@@ -826,7 +922,7 @@ FederatedHost.belongsToMany(Post, {
 })
 Post.belongsToMany(FederatedHost, {
   through: PostHostView,
-  as: 'hostView',
+  as: 'hostView'
 })
 
 Post.belongsToMany(User, {
@@ -939,5 +1035,7 @@ export {
   Quotes,
   PostHostView,
   RemoteUserPostView,
-  Ask
+  Ask,
+  Notification,
+  BskyInviteCodes
 }

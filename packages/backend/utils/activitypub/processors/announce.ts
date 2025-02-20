@@ -1,4 +1,4 @@
-import { Post } from '../../../db.js'
+import { Notification, Post } from '../../../db.js'
 import { environment } from '../../../environment.js'
 import { activityPubObject } from '../../../interfaces/fediverse/activityPubObject.js'
 import { logger } from '../../logger.js'
@@ -15,15 +15,15 @@ async function AnnounceActivity(body: activityPubObject, remoteUser: any, user: 
     }
   })
   if (existingPost) {
-    return;
+    return
   }
   // LEMMY HACK
   let urlToGet =
     typeof apObject.object === 'string'
       ? apObject.object
       : apObject.object.object
-        ? apObject.object.object
-        : apObject.id
+      ? apObject.object.object
+      : apObject.id
   urlToGet = typeof urlToGet === 'string' ? urlToGet : urlToGet?.id
   if (!urlToGet) {
     const error = new Error()
@@ -46,6 +46,7 @@ async function AnnounceActivity(body: activityPubObject, remoteUser: any, user: 
   if (remoteUser.url !== environment.deletedUser && retooted_content) {
     const postToCreate = {
       content: '',
+      isReblog: true,
       content_warning: '',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -56,6 +57,12 @@ async function AnnounceActivity(body: activityPubObject, remoteUser: any, user: 
     }
     const newToot = await Post.create(postToCreate)
     await newToot.save()
+    await Notification.create({
+      notificationType: 'REWOOT',
+      postId: retooted_content.id,
+      notifiedUserId: retooted_content.userId,
+      userId: remoteUser.id
+    })
     // await signAndAccept({ body: body }, remoteUser, user)
   }
 }

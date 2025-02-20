@@ -13,26 +13,26 @@
     <a
       class="user-link user-name"
       [routerLink]="'/blog/' + notification.userUrl"
-      [innerHTML]="notification.userUrl"
+      [innerHTML]="notification.userName"
     ></a>
     <span class="text-sm post-action">
       @switch (notification.type) {
-        @case (notificationType.MENTION) {
+        @case ('MENTION') {
           mentioned you in a woot
         }
-        @case (notificationType.LIKE) {
+        @case ('LIKE') {
           liked one of your woots
         }
-        @case (notificationType.FOLLOW) {
+        @case ('FOLLOW') {
           now follows you!
         }
-        @case (notificationType.REBLOG) {
+        @case ('REWOOT') {
           rewooted one of your woots
         }
-        @case (notificationType.QUOTE) {
+        @case ('QUOTE') {
           quoted you in a woot
         }
-        @case (notificationType.EMOJIREACT) {
+        @case ('EMOJIREACT') {
           reacted with
           @if (emojiUrl) {
             <img class="post-emoji" [src]="emojiUrl" [alt]="notification.emojiName" />
@@ -44,16 +44,15 @@
       }
     </span>
   </app-post-ribbon>
-  @if (notification.type !== notificationType.FOLLOW) {
+  @if (notification.type !== 'FOLLOW') {
     <hr />
-    <div class="relative notification-content-shortened">
-      <a [routerLink]="notification.url" class="absolute inset-0">
-        <span class="opacity-0">direct link to the post</span>
-      </a>
-      @if (notification.fragment) {
-        <app-post-header [fragment]="notification.fragment"></app-post-header>
-        <app-post-fragment [fragment]="notification.fragment"></app-post-fragment>
-      }
+    <div class="notification-content-shortened">
+      <div [routerLink]="notification.url">
+        @if (notification.fragment) {
+          <app-post-header [fragment]="notification.fragment"></app-post-header>
+          <app-post-fragment [fragment]="notification.fragment"></app-post-fragment>
+        }
+      </div>
     </div>
   }
 </mat-card>

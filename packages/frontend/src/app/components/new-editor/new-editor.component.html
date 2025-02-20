@@ -3,7 +3,7 @@
     <fa-icon size="lg" [icon]="closeIcon"></fa-icon>
   </button>
   @if (data && data.post && !editing) {
-    <p class="text-2xl mt-2 mb-4">In reply to:</p>
+    <p class="text-2xl mt-2 mb-4">{{ 'editor.inReplyTo' | translate }}</p>
     <div class="mb-3 quoted-post">
       <app-post-header [fragment]="data.post" [disableLink]="true"></app-post-header>
       <app-post-fragment [fragment]="data.post"></app-post-fragment>
@@ -45,8 +45,8 @@
       (mousedown)="showContentWarning = !showContentWarning"
       matTooltip="Content Warning"
     >
-      @if (contentWarning.split(' ').includes('meta')) {
-        <fa-icon size="lg" [icon]="landMineIcon"></fa-icon>
+      @if (contentWarning.includes('meta')) {
+        <fa-icon size="lg" [icon]="skull"></fa-icon>
       } @else {
         <fa-icon size="lg" [icon]="contentWarningIcon"></fa-icon>
       }
@@ -108,14 +108,13 @@
           <app-media-preview [media]="media"></app-media-preview>
           <mat-form-field class="w-full">
             <mat-label>Image Description</mat-label>
-            <input
+            <textarea
               placeholder="Description. Please FILL THIS"
               [(ngModel)]="media.description"
-              type="text"
               matNativeControl
               required
               class="w-full"
-            />
+            ></textarea>
           </mat-form-field>
           <div>
             <mat-checkbox [(ngModel)]="media.NSFW" class="w-full">NSFW</mat-checkbox>

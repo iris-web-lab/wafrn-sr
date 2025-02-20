@@ -6,35 +6,25 @@
         <img [src]="avatarUrl" alt="user avatar" class="blog-avatar-image" />
       </div>
       @if (userLoggedIn && !isMe) {
-        <div *ngIf="userLoggedIn" class="flex">
-          <button
-            mat-stroked-button
-            [color]="postService.followedUserIds.indexOf(blogDetails.id) === -1 ? 'primary' : 'warn'"
-            *ngIf="!postService.notYetAcceptedFollowedUsersIds.includes(blogDetails.id)"
-            class="split-button-left"
-            (mousedown)="
+      <div *ngIf="userLoggedIn" class="flex">
+        <button mat-stroked-button
+          [color]="postService.followedUserIds.indexOf(blogDetails.id) === -1 ? 'primary' : 'warn'"
+          *ngIf="!postService.notYetAcceptedFollowedUsersIds.includes(blogDetails.id)" class="split-button-left"
+          (mousedown)="
               postService.followedUserIds.indexOf(blogDetails.id) === -1
                 ? followUser(blogDetails.id)
                 : unfollowUser(blogDetails.id)
-            "
-          >
+            ">
             {{ postService.followedUserIds.indexOf(blogDetails.id) === -1 ? 'Zaprati' : 'Odprati' }}
           </button>
-          <button
-            mat-stroked-button
-            color="accent"
+          <button mat-stroked-button color="accent"
             *ngIf="postService.notYetAcceptedFollowedUsersIds.includes(blogDetails.id) && userLoggedIn"
-            class="split-button-left"
-            (mousedown)="unfollowUser(blogDetails.id)"
-          >
+            class="split-button-left" (mousedown)="unfollowUser(blogDetails.id)">
             Čeka se odobrenje
           </button>
-          <button
-            [matMenuTriggerFor]="menu"
-            mat-stroked-button
+          <button aria-label="Još opcija" [matMenuTriggerFor]="menu" mat-stroked-button
             [color]="postService.followedUserIds.indexOf(blogDetails.id) === -1 ? 'primary' : 'warn'"
-            class="split-button-right"
-          >
+            class="split-button-right">
             <fa-icon [icon]="expandDownIcon"></fa-icon>
           </button>
         </div>
@@ -63,11 +53,8 @@
                 <fa-icon class="mr-2" [icon]="unblockServerIcon"></fa-icon>Blokiraj server
               </button>
             } @else {
-              <button
-                *ngIf="blogDetails.federatedHost"
-                mat-menu-item
-                (mousedown)="blockService.unblockServer(this.blogDetails.federatedHost.id)"
-              >
+              <button *ngIf="blogDetails.federatedHost" mat-menu-item
+                (mousedown)="blockService.unblockServer(this.blogDetails.federatedHost.id)">
                 <fa-icon class="mr-2" [icon]="unblockServerIcon"></fa-icon>Odblokiraj server
               </button>
             }
@@ -101,20 +88,11 @@
     <details class="mt-2">
       <summary class="text-center">Pošalji pitanje od van WAFRN-a</summary>
       <p class="m-0">
-        Ovom korisniku možeš poslati ne-anonimno kao Tumblr pitanje sa svoje fedi instancije s sledečim strukturom: " !ask &#64;{{
+        Ovom korisniku možeš poslati ne-anonimno (kao Tumblr) pitanje sa svoje fedi instance s sledečom strukturom: " !ask &#64;{{
           blogDetails.url
         }}
-        TVOJE PITANJE OVDE". Bilo koji multimedija sadržaji i emotikoni biće ignorisani. Možeš samo jednog korisnika @-ovati po objavi. Ako se ne uspe, korisnik će dobiti pitanje kao običnu direktnu poruku. Takođe, sadržaj poruke bi bio objavljen
-        kao AP objekat da bi verificirao da je pitanje pravo.
-      </p>
-      <summary class="text-center">Send ask from outside Wafrn</summary>
-      <p class="m-0">
-        You can send this user a non-anonymous ask from your fedi instance with the following structure: " !ask &#64;{{
-          blogDetails.url
-        }}
-        YOUR QUESTION HERE". The medias and emojis you attach will be ignored, and you can only send one mention on the
-        post. If it goes wrong, the user will receive it as a regular DM. Also, the content of the DM will be published
-        as the AP object to verify the ask as genuine
+        TVOJE PITANJE OVDE". Bilo koji multimedija sadržaji i emotikoni biće ignorisani. Možeš samo jednog korisnika @-ovati po objavi. Ako ne uspe, korisnik će dobiti pitanje kao običnu direktnu poruku. Takođe, sadržaj poruke bi bio objavljen
+        kao AP objekat da bi se verifikovalo da je pitanje pravo.
       </p>
     </details>
   }
@@ -124,17 +102,13 @@
         <b class="m-0 text-lg text-center">{{ formatBigNumber(blogDetails.postCount) }}</b>
         <p class="m-0 text-xs">Broj objava</p>
       </div>
-      <a
-        [routerLink]="['/blog', blogDetails.url, 'following']"
-        class="flex flex-column justify-content-center subtle-link"
-      >
+      <a [routerLink]="['/blog', blogDetails.url, 'following']"
+        class="flex flex-column justify-content-center subtle-link">
         <b class="m-0 text-lg text-center">{{ formatBigNumber(blogDetails.followed) }}</b>
         <p class="m-0 text-xs">Prati</p>
       </a>
-      <a
-        [routerLink]="['/blog', blogDetails.url, 'followers']"
-        class="flex flex-column justify-content-center subtle-link"
-      >
+      <a [routerLink]="['/blog', blogDetails.url, 'followers']"
+        class="flex flex-column justify-content-center subtle-link">
         <b class="m-0 text-lg text-center">{{ formatBigNumber(blogDetails.followers) }}</b>
         <p class="m-0 text-xs">Pratioci</p>
       </a>
@@ -144,14 +118,10 @@
 @if (blogDetails.url.startsWith('@')) {
   <app-info-card type="info" class="block pt-3 pb-6 mx-2 lg:mx-4 wafrn-container"
     >S obzirom na to da je korisnik sa druge fedi instance, prikazane informacije mogu biti nepotpune.
-    <a
-      [href]="
+    <a [href]="
         blogDetails.url.split('@').length === 3
           ? blogDetails.remoteId
           : 'https://bsky.app/profile/' + blogDetails.url.split('@')[1]
-      "
-      target="_blank"
-      >Prikaži na originalnoj instanci</a
-    >
+      " target="_blank">Prikaži na originalnoj instanci</a>
   </app-info-card>
 }

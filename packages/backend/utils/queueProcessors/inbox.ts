@@ -22,6 +22,7 @@ import { BlockActivity } from '../activitypub/processors/block.js'
 import { MoveActivity } from '../activitypub/processors/move.js'
 import { RejectActivity } from '../activitypub/processors/reject.js'
 import { wait } from '../wait.js'
+import { flagActivity } from '../activitypub/processors/flag.js'
 
 async function inboxWorker(job: Job) {
   try {
@@ -79,8 +80,7 @@ async function inboxWorker(job: Job) {
           break
         }
         case 'Update': {
-          logger.debug(`Update recived ${body.id}`)
-          await wait(5000);
+          await wait(5000)
           await UpdateActivity(body, remoteUser, user)
           break
         }
@@ -115,6 +115,10 @@ async function inboxWorker(job: Job) {
 
         case 'Move': {
           await MoveActivity(body, remoteUser, user)
+          break
+        }
+        case 'Flag': {
+          await flagActivity(body, remoteUser, user)
           break
         }
 

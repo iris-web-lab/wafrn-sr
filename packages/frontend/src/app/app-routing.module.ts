@@ -35,7 +35,7 @@ const routes: Routes = [
       {
         path: 'dashboard',
         loadChildren: () => import('./pages/dashboard/dashboard.module').then((m) => m.DashboardModule),
-        data: { reuseRoute: true }
+        data: { reuseRoute: false }
       },
       {
         path: 'activate',
@@ -55,17 +55,18 @@ const routes: Routes = [
         loadChildren: () => import('./pages/single-post/single-post.module').then((m) => m.SinglePostModule)
       },
       {
-        path: 'article/',
+        path: 'article',
         loadChildren: () => import('./pages/single-post/single-post.module').then((m) => m.SinglePostModule)
       },
       {
         path: 'blog',
         loadChildren: () => import('./pages/view-blog/view-blog.module').then((m) => m.ViewBlogModule),
-        data: { reuseRoute: true }
+        data: { reuseRoute: false } // BUG ON THIS ONE. THIS ONE GOES INTO A LOOP
       },
       {
         path: 'profile',
-        loadChildren: () => import('./pages/profile/profile.module').then((m) => m.ProfileModule)
+        loadChildren: () => import('./pages/profile/profile.module').then((m) => m.ProfileModule),
+        canActivate: [loginRequiredGuard]
       },
       {
         path: 'login',

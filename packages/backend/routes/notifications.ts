@@ -6,10 +6,12 @@ import {
   EmojiReaction,
   Follows,
   Media,
+  Notification,
   Post,
   PostEmojiRelations,
   PostMentionsUserRelation,
   PostReport,
+  PostTag,
   Quotes,
   sequelize,
   User,
@@ -23,169 +25,330 @@ import AuthorizedRequest from '../interfaces/authorizedRequest.js'
 import { getMutedPosts } from '../utils/cacheGetters/getMutedPosts.js'
 import getBlockedIds from '../utils/cacheGetters/getBlockedIds.js'
 import { getMedias } from '../utils/baseQueryNew.js'
+import { forceUpdateLastActive } from '../utils/forceUpdateLastActive.js'
 
 export default function notificationRoutes(app: Application) {
-  app.get('/api/v2/notificationsScroll', authenticateToken, async (req: AuthorizedRequest, res: Response) => {
-    const userId = req.jwtData?.userId ? req.jwtData?.userId : '00000000-0000-0000-0000-000000000000'
-    User.findByPk(userId).then(async (usr: any) => {
-      if (usr && req.query?.page === '0') {
-        usr.lastTimeNotificationsCheck = new Date()
-        await usr.save()
+  app.get(
+    '/api/v2/notificationsScroll',
+    authenticateToken,
+    forceUpdateLastActive,
+    async (req: AuthorizedRequest, res: Response) => {
+      const userId = req.jwtData?.userId ? req.jwtData?.userId : '00000000-0000-0000-0000-000000000000'
+      User.findByPk(userId).then(async (usr: any) => {
+        if (usr && req.query?.page === '0') {
+          usr.lastTimeNotificationsCheck = new Date()
+          await usr.save()
+        }
+      })
+      // MULTIPLE DATES ON SAME ENDPOINT SO
+      const likesDate = req.query?.likesDate ? new Date(parseInt(req.query.likesDate as string)) : new Date()
+      const followsDate = req.query?.followsDate ? new Date(parseInt(req.query.followsDate as string)) : new Date()
+      const reblogsDate = req.query?.reblogsDate ? new Date(parseInt(req.query.reblogsDate as string)) : new Date()
+      const mentionsDate = req.query?.mentionsDate ? new Date(parseInt(req.query.mentionsDate as string)) : new Date()
+      const emojiReactionDate = req.query?.emojiReactionDate
+        ? new Date(parseInt(req.query.emojiReactionDate as string))
+        : new Date()
+      const quotesDate = req.query?.quotesDate ? new Date(parseInt(req.query.quotesDate as string)) : new Date()
+
+      let reblogQuery: any = getReblogQuery(userId, reblogsDate)
+      let followsQuery: any = getNewFollows(userId, followsDate)
+      let mentionedPostsPreQuery: any = getMentionedPostsId(userId, mentionsDate, Op.lt, true)
+      let quotedPostsPreQuery: any = getQuotedPostsQuery(userId, quotesDate, Op.lt, true)
+      await Promise.all([reblogQuery, followsQuery, mentionedPostsPreQuery, quotedPostsPreQuery])
+      reblogQuery = await reblogQuery
+      followsQuery = await followsQuery
+      mentionedPostsPreQuery = await mentionedPostsPreQuery
+      quotedPostsPreQuery = await quotedPostsPreQuery
+
+      const newQuotes = Quotes.findAll(quotedPostsPreQuery)
+
+      reblogQuery.where.createdAt = {
+        [Op.lt]: reblogsDate
       }
-    })
-    // MULTIPLE DATES ON SAME ENDPOINT SO
-    const likesDate = req.query?.likesDate ? new Date(parseInt(req.query.likesDate as string)) : new Date()
-    const followsDate = req.query?.followsDate ? new Date(parseInt(req.query.followsDate as string)) : new Date()
-    const reblogsDate = req.query?.reblogsDate ? new Date(parseInt(req.query.reblogsDate as string)) : new Date()
-    const mentionsDate = req.query?.mentionsDate ? new Date(parseInt(req.query.mentionsDate as string)) : new Date()
-    const emojiReactionDate = req.query?.emojiReactionDate
-      ? new Date(parseInt(req.query.emojiReactionDate as string))
-      : new Date()
-    const quotesDate = req.query?.quotesDate ? new Date(parseInt(req.query.quotesDate as string)) : new Date()
+      const reblogs = Post.findAll({
+        ...reblogQuery,
+        limit: environment.postsPerPage
+      })
+      const mentionedPostsId = mentionedPostsPreQuery.map((mention: any) => mention.postId)
 
-    const newQuotes = Quotes.findAll(await getQuotedPostsQuery(userId, quotesDate, Op.lt, true))
+      const mentions = Post.findAll({
+        where: {
+          id: { [Op.in]: mentionedPostsId }
+        }
+      })
+      followsQuery.where.createdAt = {
+        [Op.lt]: followsDate
+      }
 
-    const reblogQuery: any = await getReblogQuery(userId, reblogsDate)
-    reblogQuery.where.createdAt = {
-      [Op.lt]: reblogsDate
+      const newEmojiReactions = getEmojiReactedPostsId(userId, emojiReactionDate, Op.lt, true)
+      const follows = Follows.findAll({
+        ...followsQuery,
+        limit: environment.postsPerPage
+      })
+      const likes = getLikedPostsId(userId, likesDate, Op.lt, true)
+
+      await Promise.all([newEmojiReactions, likes, reblogs, newQuotes])
+      const postIds = mentionedPostsId
+        .concat((await newEmojiReactions).map((react: any) => react.postId))
+        .concat((await likes).map((like: any) => like.postId))
+        .concat((await reblogs).map((reblog: any) => reblog.parentId))
+        .concat((await reblogs).map((reblog: any) => reblog.id))
+        .concat((await newQuotes).map((quote: any) => quote.quoterPostId))
+        .concat((await newQuotes).map((quote: any) => quote.quotedPostId))
+
+      const medias = getMedias(postIds)
+      const posts = Post.findAll({
+        where: {
+          id: {
+            [Op.in]: postIds
+          }
+        }
+      })
+
+      const asks = Ask.findAll({
+        attributes: ['question', 'apObject', 'createdAt', 'updatedAt', 'postId', 'userAsked', 'userAsker'],
+        where: {
+          postId: {
+            [Op.in]: postIds
+          }
+        }
+      })
+
+      await Promise.all([asks, posts, medias])
+
+      const userIds = (await reblogs)
+        .map((rb: any) => rb.userId)
+        .concat((await newEmojiReactions).map((react: any) => react.userId))
+        .concat((await follows).map((elem: any) => elem.followerId))
+        .concat((await likes).map((like: any) => like.userId))
+        .concat([userId])
+        .concat((await posts).map((post: any) => post.userId))
+        .concat((await asks).map((ask: any) => ask.userAsker))
+
+      const users = User.findAll({
+        attributes: ['name', 'url', 'avatar', 'id'],
+        where: {
+          id: {
+            [Op.in]: userIds
+          }
+        }
+      })
+      await Promise.all([medias, users])
+
+      const userEmojis = await UserEmojiRelation.findAll({
+        where: {
+          userId: {
+            [Op.in]: (await users).map((usr: any) => usr.id)
+          }
+        }
+      })
+
+      const emojis = Emoji.findAll({
+        where: {
+          id: {
+            [Op.in]: (await newEmojiReactions)
+              .map((emojireact: any) => emojireact.emojiId)
+              .concat(userEmojis.map((usrEmjRel: any) => usrEmjRel.emojiId))
+          }
+        }
+      })
+
+      res.send({
+        asks: await asks,
+        emojiReactions: await newEmojiReactions,
+        emojis: await emojis,
+        users: await users,
+        posts: await posts,
+        reblogs: await reblogs,
+        likes: await likes,
+        mentions: await mentions,
+        follows: await follows,
+        medias: await medias,
+        quotes: await newQuotes,
+        userEmojisRelation: await userEmojis
+      })
     }
-    const reblogs = Post.findAll({
-      ...reblogQuery,
-      limit: environment.postsPerPage
-    })
+  )
 
-    const mentionedPostsId = (await getMentionedPostsId(userId, mentionsDate, Op.lt, true)).map(
-      (mention: any) => mention.postId
-    )
+  app.get(
+    '/api/v3/notificationsScroll',
+    authenticateToken,
+    forceUpdateLastActive,
+    async (req: AuthorizedRequest, res: Response) => {
+      const userId = req.jwtData?.userId ? req.jwtData?.userId : '00000000-0000-0000-0000-000000000000'
+      User.findByPk(userId).then(async (usr: any) => {
+        if (usr && req.query?.page === '0') {
+          usr.lastTimeNotificationsCheck = new Date()
+          await usr.save()
+        }
+      })
+      const scrollDate = req.query?.date ? new Date(parseInt(req.query.date as string)) : new Date()
+      const mutedPostIds = (await getMutedPosts(userId)).concat(await getMutedPosts(userId, true))
+      const notifications = await Notification.findAll({
+        where: {
+          [Op.or]: [
+            {
+              postId: {
+                [Op.notIn]: mutedPostIds?.length ? mutedPostIds : ['00000000-0000-0000-0000-000000000000']
+              }
+            },
+            {
+              notificationType: 'FOLLOW'
+            }
+          ],
 
-    const mentions = Post.findAll({
-      where: {
-        id: { [Op.in]: mentionedPostsId }
-      }
-    })
-    const followsQuery: any = await getNewFollows(userId, followsDate)
-    followsQuery.where.createdAt = {
-      [Op.lt]: followsDate
+          notifiedUserId: userId,
+          createdAt: {
+            [Op.lt]: scrollDate
+          }
+        },
+        order: [['createdAt', 'DESC']],
+        limit: 20
+      })
+      const userIds = notifications.map((elem) => elem.userId).concat(userId)
+      const postsIds = notifications.map((elem) => elem.postId)
+      const emojiReactionsIds = notifications.filter((elem) => elem.emojiReactionId).map((elem) => elem.emojiReactionId)
+
+      const postsWithQuotes = await Quotes.findAll({
+        where: {
+          quoterPostId: {
+            [Op.in]: notifications.filter((elem) => elem.postId != undefined).map((elem) => elem.postId)
+          }
+        }
+      })
+      const quotedPostsIds = postsWithQuotes.map((elem) => elem.quotedPostId)
+
+      let users = User.findAll({
+        attributes: ['id', 'url', 'name', 'avatar'],
+        where: {
+          id: {
+            [Op.in]: userIds
+          }
+        }
+      })
+      let posts = Post.findAll({
+        where: {
+          id: {
+            [Op.in]: [...postsIds, ...quotedPostsIds]
+          }
+        }
+      })
+      let asks = Ask.findAll({
+        where: {
+          postId: {
+            [Op.in]: postsIds
+          }
+        }
+      })
+      let medias = Media.findAll({
+        attributes: [
+          'id',
+          'NSFW',
+          'description',
+          'url',
+          'external',
+          'mediaOrder',
+          'mediaType',
+          'postId',
+          'blurhash',
+          'width',
+          'height'
+        ],
+        where: {
+          postId: {
+            [Op.in]: postsIds
+          }
+        }
+      })
+      let tags = PostTag.findAll({
+        where: {
+          postId: {
+            [Op.in]: postsIds
+          }
+        }
+      })
+      let userEmojis = UserEmojiRelation.findAll({
+        where: {
+          userId: {
+            [Op.in]: userIds
+          }
+        }
+      })
+      let postEmojis = PostEmojiRelations.findAll({
+        where: {
+          postId: {
+            [Op.in]: postsIds
+          }
+        }
+      })
+      let emojiReactions = EmojiReaction.findAll({
+        where: {
+          id: {
+            [Op.in]: emojiReactionsIds
+          }
+        }
+      })
+
+      const [_emojiReactions, _userEmojis, _postEmojis] = await Promise.all([emojiReactions, userEmojis, postEmojis])
+
+      let emojisToGet = _emojiReactions
+        .map((elem) => elem.emojiId)
+        .concat(_userEmojis.map((elem) => elem.emojiId))
+        .concat(_postEmojis.map((elem) => elem.emojiId))
+
+      const emojis = await Emoji.findAll({
+        where: {
+          id: {
+            [Op.in]: emojisToGet
+          }
+        }
+      })
+
+      // not including emoji promises here as they were already awaited above
+      await Promise.all([users, posts, asks, tags, medias])
+
+      res.send({
+        notifications,
+        users: await users,
+        posts: await posts,
+        medias: await medias,
+        asks: await asks,
+        tags: await tags,
+        quotes: postsWithQuotes,
+        emojiRelations: {
+          userEmojiRelation: _userEmojis,
+          postEmojiRelation: _postEmojis,
+          postEmojiReactions: _emojiReactions,
+          emojis: emojis
+        }
+      })
     }
-
-    const newEmojiReactions = getEmojiReactedPostsId(userId, emojiReactionDate, Op.lt, true)
-    const follows = Follows.findAll({
-      ...followsQuery,
-      limit: environment.postsPerPage
-    })
-    const likes = getLikedPostsId(userId, likesDate, Op.lt, true)
-
-    await Promise.all([newEmojiReactions, likes, reblogs, newQuotes])
-    const postIds = mentionedPostsId
-      .concat((await newEmojiReactions).map((react: any) => react.postId))
-      .concat((await likes).map((like: any) => like.postId))
-      .concat((await reblogs).map((reblog: any) => reblog.parentId))
-      .concat((await reblogs).map((reblog: any) => reblog.id))
-      .concat((await newQuotes).map((quote: any) => quote.quoterPostId))
-      .concat((await newQuotes).map((quote: any) => quote.quotedPostId))
-
-    const medias = getMedias(postIds)
-    const posts = Post.findAll({
-      where: {
-        id: {
-          [Op.in]: postIds
-        }
-      }
-    })
-
-    const asks = Ask.findAll({
-      attributes: ['question', 'apObject', 'createdAt', 'updatedAt', 'postId', 'userAsked', 'userAsker'],
-      where: {
-        postId: {
-          [Op.in]: postIds
-        }
-      }
-    })
-
-    await Promise.all([asks, posts, medias])
-
-    const userIds = (await reblogs)
-      .map((rb: any) => rb.userId)
-      .concat((await newEmojiReactions).map((react: any) => react.userId))
-      .concat((await follows).map((elem: any) => elem.followerId))
-      .concat((await likes).map((like: any) => like.userId))
-      .concat([userId])
-      .concat((await posts).map((post: any) => post.userId))
-      .concat((await asks).map((ask: any) => ask.userAsker))
-
-    const users = User.findAll({
-      attributes: ['name', 'url', 'avatar', 'id'],
-      where: {
-        id: {
-          [Op.in]: userIds
-        }
-      }
-    })
-    await Promise.all([medias, users])
-
-    const userEmojis = await UserEmojiRelation.findAll({
-      where: {
-        userId: {
-          [Op.in]: (await users).map((usr: any) => usr.id)
-        }
-      }
-    })
-
-    const emojis = Emoji.findAll({
-      where: {
-        id: {
-          [Op.in]: (await newEmojiReactions)
-            .map((emojireact: any) => emojireact.emojiId)
-            .concat(userEmojis.map((usrEmjRel: any) => usrEmjRel.emojiId))
-        }
-      }
-    })
-
-    res.send({
-      asks: await asks,
-      emojiReactions: await newEmojiReactions,
-      emojis: await emojis,
-      users: await users,
-      posts: await posts,
-      reblogs: await reblogs,
-      likes: await likes,
-      mentions: await mentions,
-      follows: await follows,
-      medias: await medias,
-      quotes: await newQuotes,
-      userEmojisRelation: await userEmojis
-    })
-  })
-
-  app.get('/api/v3/notificationsScroll', authenticateToken, async (req: AuthorizedRequest, res: Response) => {
-    const page = req.query?.page ? parseInt(req.query.page as string) : 0
-    /* TMP query
-SELECT "followerId" as "userId", "createdAt", 'FOLLOW' as "type" FROM "follows" WHERE "followedId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' AND "accepted" = TRUE ORDER BY "createdAt" DESC LIMIT 20 OFFSET (0* 20);
-
-SELECT "postId", "createdAt", 'MENTION' as "type" FROM "postMentionsUserRelations" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' AND "postId" NOT IN (SELECT "postsId" FROM "postsancestors" WHERE "ancestorId" IN (SELECT "postId" FROM "silencedPosts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' AND "superMuted" = TRUE)) ORDER BY "createdAt" DESC LIMIT 20 OFFSET (0* 20);
-
-SELECT "createdAt", "quoterPostId" as "postId", 'QUOTE' as "TYPE"  FROM "quotes" WHERE "quotedPostId" IN (SELECT "id" FROM "posts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' ) ORDER BY "createdAt" DESC LIMIT 20 OFFSET (0* 20);
-
-SELECT "postId", "userId", "createdAt", 'LIKE' as "type" FROM "userLikesPostRelations" WHERE "postId" IN (SELECT "id" FROM "posts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' ) ORDER BY "createdAt" DESC LIMIT 20 OFFSET (0* 20);
-
-SELECT "postId", "userId", "createdAt", "emojiId", "content", 'EMOJIREACT' as "type" FROM "emojiReactions" WHERE "postId" IN (SELECT "id" FROM "posts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' ) ORDER BY "createdAt" DESC LIMIT 20 OFFSET (0* 20);
-
-SELECT "parentId" as "postId", "userId", "createdAt", 'REBLOG' as "type" FROM "posts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' AND "id" NOT IN (SELECT "postsId" FROM "postsancestors" WHERE "ancestorId" IN (SELECT "postId" FROM "silencedPosts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' AND "superMuted" = TRUE)) AND "parentId" IN (SELECT "id" FROM "posts" WHERE "userId" = 'bd78a757-b69e-482c-b4a6-dd6ec62eb933' ) ORDER BY "createdAt" DESC LIMIT 20 OFFSET (0* 20);
-    */
-  })
+  )
 
   app.get('/api/v2/notificationsCount', authenticateToken, async (req: AuthorizedRequest, res: Response) => {
     const userId = req.jwtData?.userId ? req.jwtData?.userId : '00000000-0000-0000-0000-000000000000'
 
     //const blockedUsers = await getBlockedIds(userId)
     const startCountDate = (await User.findByPk(userId)).lastTimeNotificationsCheck
-    const mentionIds = await getMentionedPostsId(userId, startCountDate, Op.gt)
-    const postMentions = mentionIds.length
-    const newPostReblogs = Post.count(await getReblogQuery(userId, startCountDate))
-    const newEmojiReactions = getEmojiReactedPostsId(userId, startCountDate, Op.gt)
-    const newFollows = Follows.count(await getNewFollows(userId, startCountDate))
-    const newQuotes = Quotes.count(await getQuotedPostsQuery(userId, startCountDate, Op.gt))
-    const newLikes = (await getLikedPostsId(userId, startCountDate, Op.gt)).length
+    const mutedPostIds = (await getMutedPosts(userId)).concat(await getMutedPosts(userId, true))
+    const notificationsCount = await Notification.count({
+      where: {
+        notifiedUserId: userId,
+        [Op.or]: [
+          {
+            postId: {
+              [Op.notIn]: mutedPostIds?.length ? mutedPostIds : ['00000000-0000-0000-0000-000000000000']
+            }
+          },
+          {
+            notificationType: 'FOLLOW'
+          }
+        ],
+        createdAt: {
+          [Op.gt]: startCountDate
+        }
+      }
+    })
     const pendingFollows = Follows.count({
       where: {
         followedId: userId,
@@ -220,26 +383,10 @@ SELECT "parentId" as "postId", "userId", "createdAt", 'REBLOG' as "type" FROM "p
         postId: null
       }
     })
-    await Promise.all([
-      newFollows,
-      postMentions,
-      newLikes,
-      reports,
-      usersAwaitingApproval,
-      newPostReblogs,
-      newEmojiReactions,
-      newQuotes,
-      pendingFollows
-    ])
+    await Promise.all([reports, usersAwaitingApproval, pendingFollows])
 
     res.send({
-      notifications:
-        (await newFollows) +
-        (await postMentions) +
-        (await newLikes) +
-        (await newPostReblogs) +
-        (await newEmojiReactions).length +
-        (await newQuotes),
+      notifications: notificationsCount,
       followsAwaitingApproval: await pendingFollows,
       reports: await reports,
       usersAwaitingApproval: await usersAwaitingApproval,
@@ -363,7 +510,7 @@ SELECT "parentId" as "postId", "userId", "createdAt", 'REBLOG' as "type" FROM "p
     return {
       order: [['createdAt', 'DESC']],
       where: {
-        content: '',
+        isReblog: true,
         parentId: {
           [Op.notIn]: await getMutedPosts(userId)
         },

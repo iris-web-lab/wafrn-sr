@@ -20,12 +20,20 @@
   }
   <div
     [ngClass]="{
-      'shortened-post': veryLongPost || !showFull
+      'shortened-post': veryLongPost && !expanded
     }"
   >
     @for (content of post; track $index; let index = $index) {
       <hr
-        *ngIf="(post.length > 1 && (content.content !== '' || content.tags.length)) || (post.length > 1 && index === 0)"
+        *ngIf="
+          post.length > 1 &&
+          (content.content !== '' ||
+            (content.medias && content.medias.length > 0) ||
+            index === 0 ||
+            content.tags.length > 0 ||
+            content.quotes.length > 0 ||
+            content.questionPoll)
+        "
       />
       <div
         *ngIf="
@@ -39,23 +47,46 @@
         id="fragment"
       >
         <app-post-header class="w-full" [fragment]="content" [simplified]="false"></app-post-header>
-        <app-post-fragment
-          (dismissCw)="dismissContentWarning()"
-          [showCw]="showCw"
-          [fragment]="content"
-        ></app-post-fragment>
+        <app-post-fragment (forceExpand)="expanded = true" [fragment]="content"></app-post-fragment>
       </div>
     }
   </div>
+  <hr />
+
   <button
-    *ngIf="veryLongPost || !showFull"
+    *ngIf="(postCanExpand() && !(post.length === originalPostContent.length)) || (!expanded && veryLongPost)"
     color="accent"
     class="w-full mb-3 mt-2 w-full"
-    mat-stroked-button
+    mat-flat-button
     (mousedown)="expandPost()"
   >
-    Expand woot ({{ originalPostContent.length }} posts)
+    Expand woot
+    <span *ngIf="originalPostContent.length - postsExpanded > 4"
+      >({{ originalPostContent.length - postsExpanded }} posts)</span
+    >
   </button>
-  <hr />
+  @if (originalPostContent.length - postsExpanded > 50 && finalPosts) {
+    <!--We show the 5 final posts if the post is VERY long and there are A LOT of posts to still see-->
+    <marquee>Thread collapsed because it's very long but we show you the end of the thread</marquee>
+    <hr style="margin-top: 10vh" />
+    @for (content of finalPosts; track $index; let index = $index) {
+      <div
+        *ngIf="
+          content.content !== '' ||
+          (content.medias && content.medias.length > 0) ||
+          index === 0 ||
+          content.tags.length > 0 ||
+          content.quotes.length > 0 ||
+          content.questionPoll
+        "
+        id="fragment"
+      >
+        <hr />
+        <app-post-header class="w-full" [fragment]="content" [simplified]="false"></app-post-header>
+        <app-post-fragment [fragment]="content"></app-post-fragment>
+      </div>
+    }
+  }
+
   <app-bottom-reply-bar [fragment]="finalPost" [notes]="notes"></app-bottom-reply-bar>
 </mat-card>

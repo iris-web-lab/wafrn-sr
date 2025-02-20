@@ -37,9 +37,7 @@ export default function searchRoutes(app: Application) {
       const page = Number(req?.query.page) || 0
       let taggedPostsId = PostTag.findAll({
         where: {
-          tagName: {
-            [Op.iLike]: searchTerm
-          }
+          literal: sequelize.where(sequelize.fn('lower', sequelize.col('tagName')), searchTerm.toLowerCase())
         },
         include: [
           {
@@ -194,15 +192,21 @@ export default function searchRoutes(app: Application) {
       limit: 20,
       where: {
         activated: true,
-        url: { [Op.like]: '@%' },
-        federatedHostId: {
-          [Op.notIn]: await getallBlockedServers()
+        url: {
+          [Op.iLike]: `@%${searchTerm}%`
         },
-        banned: false,
+        banned: {
+          [Op.ne]: true
+        },
         [Op.or]: [
           {
-            url: {
-              [Op.iLike]: `%${searchTerm}%`
+            federatedHostId: {
+              [Op.notIn]: await getallBlockedServers()
+            }
+          },
+          {
+            federatedHostId: {
+              [Op.eq]: null
             }
           }
         ]

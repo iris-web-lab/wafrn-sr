@@ -11,7 +11,9 @@ import {
   Follows,
   UserLikesPostRelations,
   Media,
-  Ask
+  Ask,
+  Notification,
+  UserEmojiRelation
 } from '../db.js'
 import { authenticateToken } from '../utils/authenticateToken.js'
 
@@ -38,6 +40,7 @@ import { redisCache } from '../utils/redis.js'
 import { getUserOptions } from '../utils/cacheGetters/getUserOptions.js'
 
 import showdown from 'showdown'
+import { forceUpdateLastActive } from '../utils/forceUpdateLastActive.js'
 const markdownConverter = new showdown.Converter({
   simplifiedAutoLink: true,
   literalMidWordUnderscores: true,
@@ -69,9 +72,7 @@ export default function postsRoutes(app: Application) {
       const postTitle = req.params?.title.replaceAll('-', ' ')
       const user = await User.findOne({
         where: {
-          url: {
-            [Op.iLike]: userUrl.toLowerCase()
-          }
+          literal: sequelize.where(sequelize.fn('lower', sequelize.col('url')), userUrl.toLowerCase())
         }
       })
       if (!user) {
@@ -80,9 +81,7 @@ export default function postsRoutes(app: Application) {
         const postFound = await Post.findOne({
           where: {
             userId: user.id,
-            title: {
-              [Op.iLike]: postTitle.toLowerCase()
-            }
+            literal: sequelize.where(sequelize.fn('lower', sequelize.col('title')), postTitle.toLowerCase())
           }
         })
         if (postFound) {
@@ -200,14 +199,12 @@ export default function postsRoutes(app: Application) {
   )
   app.get('/api/v2/blog', optionalAuthentication, async (req: AuthorizedRequest, res: Response) => {
     let success = false
-    const id = req.query.id
+    const id = req.query.id as string
 
     if (id) {
       const blog = await User.findOne({
         where: {
-          url: {
-            [Op.iLike]: id ? id : ''
-          }
+          literal: sequelize.where(sequelize.fn('lower', sequelize.col('url')), id.toLowerCase())
         }
       })
 
@@ -264,6 +261,7 @@ export default function postsRoutes(app: Application) {
   app.post(
     '/api/v3/createPost',
     authenticateToken,
+    forceUpdateLastActive,
     createPostLimiter,
     async (req: AuthorizedRequest, res: Response) => {
       let success = false
@@ -306,10 +304,13 @@ export default function postsRoutes(app: Application) {
               }
             }
           })
-          mentionsToAdd = mentionsToAdd.concat(ancestors.map((elem) => elem.userId))
-          if (parent.bskyUri && parent.userId != posterId) {
-            mentionsToAdd.push(parent.userId)
+          if (req.body.content != '') {
+            mentionsToAdd = mentionsToAdd.concat(ancestors.map((elem) => elem.userId))
+            if (parent.bskyUri && parent.userId != posterId) {
+              mentionsToAdd.push(parent.userId)
+            }
           }
+
           const postParentsUsers: string[] = parent.ancestors.map((elem: any) => elem.userId)
           postParentsUsers.push(parent.userId)
           // we then check if the user has threads federation enabled and if not we check that no threads user is in the thread
@@ -345,20 +346,23 @@ export default function postsRoutes(app: Application) {
               banned: true
             }
           })
-          const blocksExistingOnParents = await Blocks.count({
-            where: {
-              [Op.or]: [
-                {
-                  blockerId: posterId,
-                  blockedId: { [Op.in]: postParentsUsers }
-                },
-                {
-                  blockedId: posterId,
-                  blockerId: { [Op.in]: postParentsUsers }
+          // only count on reblogs
+          const blocksExistingOnParents = parent
+            ? await Blocks.count({
+                where: {
+                  [Op.or]: [
+                    {
+                      blockerId: posterId,
+                      blockedId: parent.userId
+                    },
+                    {
+                      blockedId: posterId,
+                      blockerId: parent.userId
+                    }
+                  ]
                 }
-              ]
-            }
-          })
+              })
+            : 0
           if (blocksExistingOnParents + bannedUsers > 0) {
             success = false
             res.status(500)
@@ -367,7 +371,7 @@ export default function postsRoutes(app: Application) {
           }
         }
 
-        let content = req.body.content ? req.body.content.trim() : ''
+        let content = req.body.content ? ' ' + req.body.content.trim() : ''
         const content_warning = req.body.content_warning
           ? req.body.content_warning.trim()
           : posterUser?.NSFW
@@ -401,7 +405,7 @@ export default function postsRoutes(app: Application) {
           })
         }
 
-        const mentionRegex = /@[\w-\.]+@?[\w-\.]*/gm
+        const mentionRegex = /\s@[\w-\.]+@?[\w-\.]*/gm
         const mentionsInPost: string[] = content.match(mentionRegex)
         content = content.replaceAll(mentionRegex, (userUrl: string) => userUrl.toLowerCase())
 
@@ -417,7 +421,7 @@ export default function postsRoutes(app: Application) {
                       [Op.any]: mentionsInPost.map((elem) => {
                         // local users are stored without the @, so remove it from the query param
                         let urlToSearch = elem.trim().toLowerCase()
-                        if (urlToSearch.match(new RegExp('@', 'g'))?.length == 1) {
+                        if (urlToSearch.split('@').length == 2 && urlToSearch.split('.').length == 1) {
                           urlToSearch = urlToSearch.split('@')[1]
                         }
                         return urlToSearch
@@ -490,12 +494,14 @@ export default function postsRoutes(app: Application) {
 
           const sortedMentions = dbFoundMentions.sort((a: any, b: any) => a.url.length - b.url.length)
           for (let userMentioned of sortedMentions) {
-            const url = userMentioned.url.trim().startsWith('@')
-              ? userMentioned.url.split('@')[1].trim()
-              : `${userMentioned.url.trim()}`
-            const remoteId = userMentioned.url.startsWith('@')
-              ? userMentioned.remoteId
-              : `${environment.frontendUrl}/fediverse/blog/${userMentioned.url}`
+            const url =
+              !userMentioned.url.trim().startsWith('@') && userMentioned.url.split('.').length == 1
+                ? `${userMentioned.url.trim()}`
+                : userMentioned.url.split('@')[1].trim()
+            const remoteId =
+              userMentioned.url.split('@').length > 2
+                ? userMentioned.remoteId
+                : `${environment.frontendUrl}/fediverse/blog/${userMentioned.url}`
             const remoteUrl = userMentioned.remoteMentionUrl ? userMentioned.remoteMentionUrl : remoteId
             const stringToReplace = userMentioned.url.startsWith('@')
               ? userMentioned.url.toLowerCase()
@@ -505,7 +511,7 @@ export default function postsRoutes(app: Application) {
           }
         }
 
-        content = markdownConverter.makeHtml(content)
+        content = markdownConverter.makeHtml(content.trim())
         let post: any
         content = content.trim()
         if (req.body.idPostToEdit) {
@@ -525,11 +531,50 @@ export default function postsRoutes(app: Application) {
             userId: posterId,
             privacy: bodyPrivacy,
             parentId: req.body.parent,
-            markdownContent: req.body.content
+            markdownContent: req.body.content,
+            isReblog: !!(
+              parent &&
+              content == '' &&
+              !postToBeQuoted &&
+              !req.body.ask &&
+              mediaToAdd.length === 0 &&
+              mentionsToAdd.length === 0 &&
+              (req.body.tags ? req.body.tags.trim : '') == ''
+            )
+          })
+        }
+        if (post.isReblog) {
+          await Notification.create({
+            notificationType: 'REWOOT',
+            notifiedUserId: parent?.userId,
+            userId: post.userId,
+            postId: parent?.id
           })
         }
         if (postToBeQuoted) {
-          post.addQuoted(postToBeQuoted)
+          if (req.body.idPostToEdit) {
+            await Notification.destroy({
+              where: {
+                notificationType: 'QUOTE',
+                notifiedUserId: postToBeQuoted.userId,
+                userId: post.userId,
+                postId: post.id
+              }
+            })
+          }
+          await post.addQuoted(postToBeQuoted)
+          await PostMentionsUserRelation.findOrCreate({
+            where: {
+              postId: post.id,
+              userId: postToBeQuoted.userId
+            }
+          })
+          await Notification.create({
+            notificationType: 'QUOTE',
+            notifiedUserId: postToBeQuoted.userId,
+            userId: post.userId,
+            postId: post.id
+          })
         }
         const askId = req.body.ask
         if (askId) {
@@ -551,6 +596,25 @@ export default function postsRoutes(app: Application) {
         mentionsToAdd = [...new Set(mentionsToAdd)].filter((elem) => elem != posterId)
         post.setMedias(mediaToAdd.map((media: any) => media.id))
         post.setMentionPost(mentionsToAdd)
+        if (req.body.idPostToEdit) {
+          await Notification.destroy({
+            where: {
+              notificationType: 'MENTION',
+              postId: post.id
+            }
+          })
+        }
+
+        await Notification.bulkCreate(
+          mentionsToAdd.map((mention) => {
+            return {
+              notificationType: 'MENTION',
+              notifiedUserId: mention,
+              userId: post.userId,
+              postId: post.id
+            }
+          })
+        )
         post.setEmojis(emojisToAdd)
         success = !req.body.tags
         if (req.body.tags) {

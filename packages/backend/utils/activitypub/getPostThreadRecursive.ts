@@ -10,7 +10,8 @@ import {
   PostTag,
   User,
   sequelize,
-  Ask
+  Ask,
+  Notification
 } from '../../db.js'
 import { environment } from '../../environment.js'
 import { logger } from '../logger.js'
@@ -22,20 +23,18 @@ import { getApObjectPrivacy } from './getPrivacy.js'
 import dompurify from 'isomorphic-dompurify'
 import { Queue } from 'bullmq'
 
-
-
-const updateMediaDataQueue = new Queue("processRemoteMediaData", {
+const updateMediaDataQueue = new Queue('processRemoteMediaData', {
   connection: environment.bullmqConnection,
   defaultJobOptions: {
     removeOnComplete: true,
     attempts: 3,
     backoff: {
-      type: "exponential",
-      delay: 1000,
+      type: 'exponential',
+      delay: 1000
     },
-    removeOnFail: 25000,
-  },
-});
+    removeOnFail: 25000
+  }
+})
 
 async function getPostThreadRecursive(
   user: any,
@@ -144,11 +143,9 @@ async function getPostThreadRecursive(
             if (!wafrnMedia.mediaType || (wafrnMedia.mediaType?.startsWith('image') && !wafrnMedia.width)) {
               await updateMediaDataQueue.add(`updateMedia:${wafrnMedia.id}`, {
                 mediaId: wafrnMedia.id
-              }
-              )
+              })
             }
             medias.push(wafrnMedia)
-
           } else {
             postTextContent = '' + postTextContent + `<a href="${remoteFile.href}" >${remoteFile.href}</a>`
           }
@@ -157,17 +154,17 @@ async function getPostThreadRecursive(
 
       const lemmyName = postPetition.name ? postPetition.name : ''
       postTextContent = postTextContent ? postTextContent : `<p>${lemmyName}</p>`
-      let createdAt = new Date(postPetition.published);
-      if(createdAt.getTime() > new Date().getTime()) {
-        createdAt = new Date();
+      let createdAt = new Date(postPetition.published)
+      if (createdAt.getTime() > new Date().getTime()) {
+        createdAt = new Date()
       }
       const postToCreate: any = {
         content: '' + postTextContent,
         content_warning: postPetition.summary
           ? postPetition.summary
           : remoteUser.NSFW
-            ? 'User is marked as NSFW by this instance staff. Possible NSFW without tagging'
-            : '',
+          ? 'User is marked as NSFW by this instance staff. Possible NSFW without tagging'
+          : '',
         createdAt: new Date(postPetition.published),
         updatedAt: createdAt,
         userId: remoteUserServerBaned || remoteUser.banned ? (await deletedUser).id : remoteUser.id,
@@ -189,10 +186,7 @@ async function getPostThreadRecursive(
                 where: {
                   [Op.or]: [
                     {
-                      literal: sequelize.where(
-                        sequelize.fn('lower', sequelize.col('url')),
-                        username.toLowerCase()
-                      )
+                      literal: sequelize.where(sequelize.fn('lower', sequelize.col('url')), username.toLowerCase())
                     }
                   ]
                 }
@@ -200,7 +194,11 @@ async function getPostThreadRecursive(
             } else {
               mentionedUser = await getRemoteActor(mention.href, user)
             }
-            if (mentionedUser?.id && mentionedUser.id != (await deletedUser)?.id && !mentionedUsersIds.includes(mentionedUser.id)) {
+            if (
+              mentionedUser?.id &&
+              mentionedUser.id != (await deletedUser)?.id &&
+              !mentionedUsersIds.includes(mentionedUser.id)
+            ) {
               mentionedUsersIds.push(mentionedUser.id)
             }
           }
@@ -266,6 +264,16 @@ async function getPostThreadRecursive(
         logger.debug(error)
       }
       newPost.setQuoted(quotes)
+      await Notification.bulkCreate(
+        quotes.map((quote) => {
+          return {
+            notificationType: 'QUOTE',
+            notifiedUserId: quote.userId,
+            userId: newPost.userId,
+            postId: newPost.id
+          }
+        })
+      )
       await newPost.save()
       try {
         if (!remoteUser.banned && !remoteUserServerBaned) {
@@ -322,6 +330,12 @@ async function addTagsToPost(post: any, tags: fediverseTag[]) {
 
 async function processMentions(post: any, userIds: string[]) {
   await post.setMentionPost([])
+  await Notification.destroy({
+    where: {
+      notificationType: 'MENTION',
+      postId: post.id
+    }
+  })
   const blocks = await Blocks.findAll({
     where: {
       blockerId: {
@@ -342,7 +356,16 @@ async function processMentions(post: any, userIds: string[]) {
   const blockerIds: string[] = blocks
     .map((block: any) => block.blockerId)
     .concat(userServerBlocks.map((elem: any) => elem.userBlockerId))
-
+  await Notification.bulkCreate(
+    userIds.map((mentionedUserId) => {
+      return {
+        notificationType: 'MENTION',
+        notifiedUserId: mentionedUserId,
+        userId: post.userId,
+        postId: post.id
+      }
+    })
+  )
   return await PostMentionsUserRelation.bulkCreate(
     userIds
       .filter((elem) => !blockerIds.includes(elem))

@@ -2,9 +2,12 @@ import { Op } from 'sequelize'
 import {
   EmojiReaction,
   Follows,
+  Media,
   Post,
   PostMentionsUserRelation,
+  PostTag,
   QuestionPollAnswer,
+  sequelize,
   User,
   UserEmojiRelation
 } from '../../db.js'
@@ -22,11 +25,13 @@ async function removeUser(userId: string) {
           url: environment.deletedUser
         }
       })
+      const postsIdsStringQuery = `"postId" IN (select "id" FROM "posts" WHERE "userId"='${userToRemove.id}')`
       userToRemove.activated = false
-      Post.update(
+      await Post.update(
         {
           userId: ownerOfDeletedPost.id,
-          content: 'Post has been deleted because remote user has been deleted'
+          content: 'Post has been deleted because remote user has been deleted',
+          isDeleted: true
         },
         {
           where: {
@@ -34,6 +39,16 @@ async function removeUser(userId: string) {
           }
         }
       )
+      await Media.destroy({
+        where: {
+          literal: sequelize.literal(postsIdsStringQuery)
+        }
+      })
+      await PostTag.destroy({
+        where: {
+          literal: sequelize.literal(postsIdsStringQuery)
+        }
+      })
       await Follows.destroy({
         where: {
           [Op.or]: [

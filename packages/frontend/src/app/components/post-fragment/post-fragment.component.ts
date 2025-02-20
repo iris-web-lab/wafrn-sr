@@ -1,12 +1,12 @@
 import { CommonModule } from '@angular/common'
 import {
   Component,
+  computed,
   ElementRef,
   EventEmitter,
   Input,
   OnChanges,
   OnDestroy,
-  OnInit,
   Output,
   viewChild
 } from '@angular/core'
@@ -25,7 +25,6 @@ import { EmojiReactComponent } from '../emoji-react/emoji-react.component'
 import { MessageService } from '../../services/message.service'
 import { Emoji } from '../../interfaces/emoji'
 import { InjectHtmlModule } from '../../directives/inject-html/inject-html.module'
-import { AvatarSmallComponent } from '../avatar-small/avatar-small.component'
 import { PostHeaderComponent } from '../post/post-header/post-header.component'
 import { SingleAskComponent } from '../single-ask/single-ask.component'
 import { EnvironmentService } from '../../services/environment.service'
@@ -63,19 +62,22 @@ type EmojiReaction = {
 })
 export class PostFragmentComponent implements OnChanges, OnDestroy {
   @Input() fragment!: ProcessedPost
-  @Input() showCw: boolean = true
-  @Input() selfManageCw: boolean = false
-  @Output() dismissCw: EventEmitter<void> = new EventEmitter<void>()
+  @Output() forceExpand = new EventEmitter<boolean>()
+  showSensitiveContent = false
   emojiCollection: EmojiReaction[] = []
   likeSubscription
   emojiSubscription
-  folowsSubscription
+  followsSubscription
   userId
-  avaiableEmojiNames: string[] = []
+  availableEmojiNames: string[] = []
 
   reactionLoading = false
   sanitizedContent = ''
+  noTagsContent = ''
   wafrnFormattedContent: Array<string | WafrnMedia> = []
+  characterCount = computed(() => this.noTagsContent.length)
+  wordCount = computed(() => this.noTagsContent.split(' ').length)
+
   seenMedia: number[] = []
 
   readonly inlineMediaElement = viewChild<ElementRef<HTMLElement>>('mediaInline')
@@ -89,13 +91,13 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
     private jwtService: JwtService,
     private messages: MessageService
   ) {
-    this.folowsSubscription = this.postService.updateFollowers.subscribe((data) => {
-      this.avaiableEmojiNames = []
+    this.followsSubscription = this.postService.updateFollowers.subscribe(() => {
+      this.availableEmojiNames = []
       this.postService.emojiCollections.forEach(
         (collection) =>
-          (this.avaiableEmojiNames = this.avaiableEmojiNames.concat(collection.emojis.map((elem) => elem.name)))
+          (this.availableEmojiNames = this.availableEmojiNames.concat(collection.emojis.map((elem) => elem.name)))
       )
-      this.avaiableEmojiNames.push('❤️')
+      this.availableEmojiNames.push('❤️')
     })
     this.userId = loginService.getLoggedUserUUID()
     this.likeSubscription = postService.postLiked.subscribe((likeEvent) => {
@@ -113,7 +115,7 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.likeSubscription.unsubscribe()
     this.emojiSubscription.unsubscribe()
-    this.folowsSubscription.unsubscribe()
+    this.followsSubscription.unsubscribe()
   }
 
   ngOnChanges(): void {
@@ -122,14 +124,12 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
   }
 
   initializeContent() {
-    if (this.fragment.content_warning && this.fragment.muted_words_cw) {
-      const disableCW = localStorage.getItem('disableCW') === 'true'
-    } else if (this.fragment.content_warning && !this.fragment.muted_words_cw) {
-      const disableCW = localStorage.getItem('disableCW') === 'true'
-      this.showCw = this.showCw && !disableCW
-    }
+    const disableCW = localStorage.getItem('disableCW') === 'true'
+    this.showSensitiveContent = disableCW
+
     let processedBlock: Array<string | WafrnMedia> = []
     this.sanitizedContent = this.postService.getPostHtml(this.fragment)
+    this.noTagsContent = this.postService.getPostHtml(this.fragment, [])
     if (this.fragment && this.fragment.medias && this.fragment.medias?.length > 0) {
       const mediaDetectorRegex = /\!\[media\-([0-9]+)]/gm
       const textDivided = this.sanitizedContent.split(mediaDetectorRegex)
@@ -196,7 +196,8 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
     this.emojiCollection = Object.values(emojiReactions)
       .sort(
         (a, b) =>
-          +(this.avaiableEmojiNames.includes(b.name) || !b.img) - +(this.avaiableEmojiNames.includes(a.name) || !a.img)
+          +(this.availableEmojiNames.includes(b.name) || !b.img) -
+          +(this.availableEmojiNames.includes(a.name) || !a.img)
       )
       .sort((a, b) => b.users.length - a.users.length)
     for (let emoji of this.emojiCollection) {
@@ -309,7 +310,7 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
         if (response) {
           this.messages.add({
             severity: 'success',
-            summary: `Reaction removed succesfully`
+            summary: `Reaction removed successfully`
           })
         }
       } else {
@@ -317,7 +318,7 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
         if (response) {
           this.messages.add({
             severity: 'success',
-            summary: `Reacted with ${emojiReaction.name} succesfully`
+            summary: `Reacted with ${emojiReaction.name} successfully`
           })
         }
       }
@@ -338,10 +339,8 @@ export class PostFragmentComponent implements OnChanges, OnDestroy {
   }
 
   cwClick() {
-    this.dismissCw.emit()
-    if (this.selfManageCw) {
-      this.showCw = !this.showCw
-    }
+    this.forceExpand.emit(true)
+    this.showSensitiveContent = !this.showSensitiveContent
   }
 
   ngAfterViewInit(): void {

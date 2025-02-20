@@ -14,21 +14,32 @@ async function getPostAndUserFromPostId(postId: string): Promise<{ found: boolea
         {
           model: User,
           as: 'user',
-          required: true
+          required: true,
+          where: {
+            banned: false
+          }
         },
         {
           model: Post,
-          include: [{
-            model: User,
-            as: 'user'
-          }],
+          include: [
+            {
+              model: User,
+              as: 'user'
+            }
+          ],
           as: 'quoted',
+          where: {
+            isDeleted: false
+          },
           required: false
         },
         {
           model: Post,
           as: 'parent',
           required: false,
+          where: {
+            isDeleted: false
+          },
           include: [
             {
               model: Media,
@@ -60,6 +71,7 @@ async function getPostAndUserFromPostId(postId: string): Promise<{ found: boolea
       ],
       where: {
         id: postId,
+        isDeleted: false,
         privacy: {
           [Op.notIn]: [2]
         }
@@ -74,7 +86,7 @@ async function getPostAndUserFromPostId(postId: string): Promise<{ found: boolea
       let shares = Post.findAll({
         where: {
           parentId: postId,
-          content: ''
+          isReblog: true
         }
       })
       let reacts = EmojiReaction.findAll({
@@ -96,9 +108,9 @@ async function getPostAndUserFromPostId(postId: string): Promise<{ found: boolea
       res = { found: false }
     }
     if (res.found) {
-      await redisCache.set('postAndUser:' + postId, JSON.stringify(res))
-    } else {
       await redisCache.set('postAndUser:' + postId, JSON.stringify(res), 'EX', 60)
+    } else {
+      // await redisCache.set('postAndUser:' + postId, JSON.stringify(res), 'EX', 60)
     }
   }
   return res

@@ -3,6 +3,7 @@ import {
   Ask,
   Emoji,
   EmojiReaction,
+  FederatedHost,
   Media,
   Post,
   PostEmojiRelations,
@@ -21,7 +22,6 @@ import getFollowedsIds from './cacheGetters/getFollowedsIds.js'
 import { Queue } from 'bullmq'
 import { environment } from '../environment.js'
 
-
 const updateMediaDataQueue = new Queue('processRemoteMediaData', {
   connection: environment.bullmqConnection,
   defaultJobOptions: {
@@ -34,7 +34,6 @@ const updateMediaDataQueue = new Queue('processRemoteMediaData', {
     removeOnFail: 25000
   }
 })
-
 
 async function getQuotes(
   postIds: string[]
@@ -50,7 +49,19 @@ async function getQuotes(
 
 async function getMedias(postIds: string[]) {
   const medias = await Media.findAll({
-    attributes: ['id', 'NSFW', 'description', 'url', 'external', 'mediaOrder', 'mediaType', 'postId', 'blurhash', 'width', 'height'],
+    attributes: [
+      'id',
+      'NSFW',
+      'description',
+      'url',
+      'external',
+      'mediaOrder',
+      'mediaType',
+      'postId',
+      'blurhash',
+      'width',
+      'height'
+    ],
     where: {
       postId: {
         [Op.in]: postIds
@@ -58,7 +69,9 @@ async function getMedias(postIds: string[]) {
     }
   })
 
-  let mediasToProcess = medias.filter((elem: any) => !elem.mediaType || (elem.mediaType?.startsWith('image') && !elem.width))
+  let mediasToProcess = medias.filter(
+    (elem: any) => !elem.mediaType || (elem.mediaType?.startsWith('image') && !elem.width)
+  )
   if (mediasToProcess && mediasToProcess.length > 0) {
     updateMediaDataQueue.addBulk(
       mediasToProcess.map((media: any) => {
@@ -69,7 +82,7 @@ async function getMedias(postIds: string[]) {
       })
     )
   }
-  return medias;
+  return medias
 }
 async function getMentionedUserIds(
   postIds: string[]
@@ -176,13 +189,18 @@ async function getUnjointedPosts(postIdsInput: string[], posterId: string) {
     include: [
       {
         model: Post,
-        as: 'ancestors'
+        as: 'ancestors',
+        required: false,
+        where: {
+          isDeleted: false
+        }
       }
     ],
     where: {
       id: {
         [Op.in]: postIdsInput
-      }
+      },
+      isDeleted: false
     }
   })
   posts.forEach((post: any) => {
@@ -215,7 +233,7 @@ async function getUnjointedPosts(postIdsInput: string[], posterId: string) {
   const rewootedPosts = await Post.findAll({
     attributes: ['id', 'parentId'],
     where: {
-      content: '',
+      isReblog: true,
       userId: posterId,
       parentId: {
         [Op.in]: postIds
@@ -263,7 +281,7 @@ async function getUnjointedPosts(postIdsInput: string[], posterId: string) {
   const likes = await getLikes(postIds)
   userIds = userIds.concat(likes.map((like: any) => like.userId))
   const users = User.findAll({
-    attributes: ['url', 'avatar', 'id', 'name', 'remoteId'],
+    attributes: ['url', 'avatar', 'id', 'name', 'remoteId', 'banned', 'bskyDid', 'isBlueskyUser', 'isFediverseUser'],
     where: {
       id: {
         [Op.in]: userIds
@@ -272,6 +290,19 @@ async function getUnjointedPosts(postIdsInput: string[], posterId: string) {
   })
   const postWithNotes = getPosstGroupDetails(posts)
   await Promise.all([emojis, users, polls, medias, tags, postWithNotes])
+  const hostsIds = (await users).filter((elem) => elem.federatedHostId).map((elem) => federatedHostId)
+  const blockedHosts = await FederatedHost.findAll({
+    where: {
+      id: {
+        [Op.in]: hostsIds
+      },
+      blocked: true
+    }
+  })
+  const blockedHostsIds = blockedHosts.map((elem) => elem.id)
+  const bannedUserIds = (await users)
+    .filter((elem) => elem.banned || blockedHostsIds.includes(elem.federatedHostId))
+    .map((elem) => elem.id)
   const usersFollowedByPoster = await getFollowedsIds(posterId)
   const tagsAwaited = await tags
   const mediasAwaited = await medias
@@ -303,7 +334,10 @@ async function getUnjointedPosts(postIdsInput: string[], posterId: string) {
     const validPrivacy = [0, 2, 3].includes(post.privacy)
     const userFollowsPoster = usersFollowedByPoster.includes(post.userId) && post.privacy === 1
     const userIsMentioned = postsMentioningUser.includes(post.id)
-    return postIsPostedByUser || validPrivacy || userFollowsPoster || userIsMentioned || isReblog
+    return (
+      !bannedUserIds.includes(post.userId) &&
+      (postIsPostedByUser || validPrivacy || userFollowsPoster || userIsMentioned || isReblog)
+    )
   })
   const postIdsToFullySend: string[] = postsToFullySend.map((post: any) => post.id)
   const postsToSend = (await postWithNotes).map((post: any) => filterPost(post, postIdsToFullySend))
@@ -314,30 +348,30 @@ async function getUnjointedPosts(postIdsInput: string[], posterId: string) {
   const quotesFiltered = quotes.filter((quote: any) => postIdsToFullySend.includes(quote.quoterPostId))
   const pollsFiltered = (await polls).filter((poll: any) => postIdsToFullySend.includes(poll.postId))
   return {
-    rewootIds: finalRewootIds,
-    posts: postsToSend,
+    rewootIds: finalRewootIds.filter((elem) => !!elem),
+    posts: postsToSend.filter((elem) => !!elem),
     emojiRelations: await emojis,
-    mentions: mentions.postMentionRelation,
-    users: await users,
-    polls: pollsFiltered,
-    medias: mediasToSend,
-    tags: tagsFiltered,
-    likes: likes,
-    quotes: quotesFiltered,
-    quotedPosts: (await quotedPosts).map((elem: any) => filterPost(elem, postIdsToFullySend)),
-    asks: asks
+    mentions: mentions.postMentionRelation.filter((elem) => !!elem),
+    users: (await users).filter((elem) => !!elem),
+    polls: pollsFiltered.filter((elem) => !!elem),
+    medias: mediasToSend.filter((elem) => !!elem),
+    tags: tagsFiltered.filter((elem) => !!elem),
+    likes: likes.filter((elem) => !!elem),
+    quotes: quotesFiltered.filter((elem) => !!elem),
+    quotedPosts: (await quotedPosts).map((elem: any) => filterPost(elem, postIdsToFullySend)).filter((elem) => !!elem),
+    asks: asks.filter((elem) => !!elem)
   }
 }
 
 function filterPost(postToBeFilter: any, postIdsToFullySend: string[]): any {
-  const res = postToBeFilter
+  let res = postToBeFilter
   if (!postIdsToFullySend.includes(res.id)) {
-    res.content =
-      res.privacy === 10
-        ? 'This post is marked as private and you do not have access to it'
-        : 'You do not follow this user and this post is marked as followers only.'
+    res = undefined
   }
-  res.ancestors = res.ancestors ? res.ancestors.map((elem: any) => filterPost(elem, postIdsToFullySend)) : []
+  if (res) {
+    res.ancestors = res.ancestors ? res.ancestors.map((elem: any) => filterPost(elem, postIdsToFullySend)) : []
+    res.ancestors = res.ancestors.filter((elem: any) => !(elem == undefined))
+  }
   return res
 }
 

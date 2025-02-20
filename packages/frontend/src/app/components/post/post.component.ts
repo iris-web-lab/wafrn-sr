@@ -1,4 +1,14 @@
-import { AfterViewInit, Component, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output } from '@angular/core'
+import {
+  AfterViewInit,
+  Component,
+  computed,
+  EventEmitter,
+  Input,
+  OnChanges,
+  OnDestroy,
+  OnInit,
+  Output
+} from '@angular/core'
 import { ProcessedPost } from 'src/app/interfaces/processed-post'
 import { EditorService } from 'src/app/services/editor.service'
 import { LoginService } from 'src/app/services/login.service'
@@ -28,6 +38,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { EnvironmentService } from 'src/app/services/environment.service'
 import { SimplifiedUser } from 'src/app/interfaces/simplified-user'
+import { environment } from 'src/environments/environment'
 
 @Component({
   selector: 'app-post',
@@ -38,7 +49,11 @@ import { SimplifiedUser } from 'src/app/interfaces/simplified-user'
 export class PostComponent implements OnInit, OnChanges, OnDestroy, AfterViewInit {
   @Input() post!: ProcessedPost[]
   @Input() showFull: boolean = false
+  postCanExpand = computed(() => this.veryLongPost || !this.showFull || !this.expanded)
+  postsExpanded = EnvironmentService.environment.shortenPosts
+  expanded = false
   originalPostContent: ProcessedPost[] = []
+  finalPosts: ProcessedPost[] = []
   ready = false
   mediaBaseUrl = EnvironmentService.environment.baseMediaUrl
   cacheurl = EnvironmentService.environment.externalCacheurl
@@ -141,6 +156,7 @@ export class PostComponent implements OnInit, OnChanges, OnDestroy, AfterViewIni
     this.followedUsers = this.postService.followedUserIds
     this.notYetAcceptedFollows = this.postService.notYetAcceptedFollowedUsersIds
     this.originalPostContent = this.post
+    this.finalPosts = this.originalPostContent.slice(-5)
     if (!this.showFull) {
       this.post = this.post.slice(0, EnvironmentService.environment.shortenPosts)
 
@@ -184,12 +200,8 @@ export class PostComponent implements OnInit, OnChanges, OnDestroy, AfterViewIni
   }
 
   expandPost() {
-    this.post = this.originalPostContent
-    this.veryLongPost = false
-    this.showFull = true
-  }
-
-  dismissContentWarning() {
-    this.showCw = !this.showCw
+    this.expanded = true
+    this.postsExpanded = this.postsExpanded + 100
+    this.post = this.originalPostContent.slice(0, this.postsExpanded)
   }
 }

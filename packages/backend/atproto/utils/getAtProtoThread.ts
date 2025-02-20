@@ -1,7 +1,7 @@
 // returns the post id
 import { getAtProtoSession } from './getAtProtoSession.js'
 import { QueryParams } from '@atproto/sync/dist/firehose/lexicons.js'
-import { Media, Post, PostMentionsUserRelation, PostTag, Quotes, User } from '../../db.js'
+import { Media, Notification, Post, PostMentionsUserRelation, PostTag, Quotes, User } from '../../db.js'
 import { environment } from '../../environment.js'
 import { Model, Op } from 'sequelize'
 import { PostView, ThreadViewPost } from '@atproto/api/dist/client/types/app/bsky/feed/defs.js'
@@ -11,6 +11,17 @@ import { getAllLocalUserIds } from '../../utils/cacheGetters/getAllLocalUserIds.
 import { wait } from '../../utils/wait.js'
 import { isArray } from 'underscore'
 import { logger } from '../../utils/logger.js'
+import { RichText } from '@atproto/api'
+import showdown from 'showdown'
+const markdownConverter = new showdown.Converter({
+  simplifiedAutoLink: true,
+  literalMidWordUnderscores: true,
+  strikethrough: true,
+  simpleLineBreaks: true,
+  openLinksInNewWindow: true,
+  emoji: true
+})
+
 const adminUser = User.findOne({
   where: {
     url: environment.adminUser
@@ -107,6 +118,9 @@ async function processSinglePost(
   parentId?: string,
   forceUpdate?: boolean
 ): Promise<string | undefined> {
+  if (!post) {
+    throw new Error('Post is undefined and should not be undefined')
+  }
   if (!forceUpdate) {
     const existingPost = await Post.findOne({
       where: {
@@ -134,44 +148,26 @@ async function processSinglePost(
     let tags: string[] = []
     let mentions: string[] = []
     let postText = post.record.text
-    if (post.record.facets && post.record.facets.length > 0) {
-      const facets = post.record.facets
-      const tagFacets = facets.filter((elem) =>
-        elem.features.some((feature) => feature['$type'] == 'app.bsky.richtext.facet#tag')
-      )
-      const mentionFacets = facets.filter((elem) =>
-        elem.features.some((feature) => feature['$type'] == 'app.bsky.richtext.facet#mention')
-      )
-      const linkFacets = facets.filter((elem) =>
-        elem.features.some((feature) => feature['$type'] == 'app.bsky.richtext.facet#link')
-      )
-      mentionFacets.forEach(async (bskyMention) => {
-        const userMentioned = await getAtprotoUser(bskyMention.features[0].did, (await adminUser) as Model<any, any>)
-        mentions.push(userMentioned.id)
+    if (post.record.facets && post.record.facets.length > 0 && agent) {
+      const rt = new RichText({
+        text: postText
       })
-      tags = tagFacets.map((elem) => elem.features[0].tag)
-      if (tagFacets.length > 0 || mentionFacets.length > 0 || linkFacets.length > 0) {
-        const postRichTextBase = postText.split('')
-        tagFacets.forEach((tag) => {
-          postRichTextBase[tag.index.byteStart] =
-            `<a target="blank" href="/dashboard/search/${tag.features[0].tag}">` + postRichTextBase[tag.index.byteStart]
-          postRichTextBase[tag.index.byteEnd - 1] = postRichTextBase[tag.index.byteEnd - 1] + '</a>'
-        })
-        linkFacets.forEach((linkFacet) => {
-          postRichTextBase[linkFacet.index.byteStart] =
-            `<a target="blank" href="${linkFacet.features[0].uri}">` + postRichTextBase[linkFacet.index.byteStart]
-          postRichTextBase[linkFacet.index.byteEnd - 1] = postRichTextBase[linkFacet.index.byteEnd - 1] + '</a>'
-        })
-        mentionFacets.forEach((mentionFacet) => {
-          postRichTextBase[mentionFacet.index.byteStart] =
-            `<a class="mention remote-mention" target="blank" href="/blog/${mentionFacet.features[0].did}">` +
-            postRichTextBase[mentionFacet.index.byteStart]
-          postRichTextBase[mentionFacet.index.byteEnd - 1] = postRichTextBase[mentionFacet.index.byteEnd - 1] + '</a>'
-        })
-
-        postText = postRichTextBase.join('')
+      await rt.detectFacets(agent)
+      let text = ''
+      for (const segment of rt.segments()) {
+        if (segment.isLink()) {
+          text += `<a href="${segment.link?.uri}" target="_blank">${segment.text}</a>`
+        } else if (segment.isMention()) {
+          text += `<a href="${environment.frontendUrl}/blog/${segment.mention?.did}" target="_blank">${segment.text}</a>`
+        } else if (segment.isTag()) {
+          text += `<a href="${environment.frontendUrl}/search/${segment.text}" target="_blank">${segment.text}</a>`
+        } else {
+          text += segment.text
+        }
       }
+      postText = text
     }
+    postText = postText.replaceAll('\n', '<br>')
     const newData = {
       userId: postCreator.id,
       bskyCid: post.cid,
@@ -211,12 +207,28 @@ async function processSinglePost(
     }
     mentions = [...new Set(mentions)]
     if (mentions.length > 0) {
+      await Notification.destroy({
+        where: {
+          notificationType: 'MENTION',
+          postId: postToProcess.id
+        }
+      })
       await PostMentionsUserRelation.destroy({
         where: {
           postId: postToProcess.id
         }
       })
-      await wait(50)
+      await Notification.bulkCreate(
+        mentions.map((mnt) => {
+          return {
+            notificationType: 'MENTION',
+            postId: postToProcess.id,
+            notifiedUserId: mnt,
+            userId: postToProcess.userId
+          }
+        }),
+        { ignoreDuplicates: true }
+      )
       await PostMentionsUserRelation.bulkCreate(
         mentions.map((mnt) => {
           return {
@@ -233,7 +245,6 @@ async function processSinglePost(
           postId: postToProcess.id
         }
       })
-      await wait(50)
       await PostTag.bulkCreate(
         tags.map((tag) => {
           return {
